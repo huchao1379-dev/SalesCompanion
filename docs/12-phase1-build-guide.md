@@ -1,6 +1,22 @@
-# 12 · Phase 1 开工指南（本仓库）
+# 12 · Phase 1 / Demo 开工指南（本仓库）
 
-把提案落到 **SalesCompanion** Code App 的可执行检查清单。完整日历与门禁见 [09 实施计划](09-implementation-roadmap.md)。
+把提案落到 **SalesCompanion** 的可执行检查清单。
+
+> **当前冲刺以 Demo 为准：** [14 Demo 计划](14-demo-plan.md) · [15 范围矩阵](15-demo-scope-matrix.md) · [13 建表](13-dataverse-table-spec.md)。  
+> 原 6 个月门禁见 [09](09-implementation-roadmap.md)（愿景，不阻塞 Demo）。
+
+### Demo 必做 vs 本仓库已有 UI
+
+| Demo 项 | 仓库现状 |
+| --- | --- |
+| 活动录入 + 草稿 Confirm | ✅ `server` 编排 + Confirm→Synced；前端已接 `/api` |
+| 客户速览对话 | ✅ 场景 B |
+| 订单/物流（选做） | ✅ 场景 C + 种子 order/shipment |
+| Home 简化 KPI | ✅ `/api/metrics` + Dataverse 种子聚合 |
+| 任务中心 / 客户画像 | ✅ 选做已接通 API |
+| Brief Me | 已有 UI；**可不纳入验收** |
+| Dataverse 普通表（VT 替身） | ✅ 内存种子 `dataverse/seed`；真实环境按 13 建表 |
+| 真实 VT / SB / Copilot / AI Builder | **明确不做** |
 
 ## 当前仓库基线
 
@@ -9,8 +25,9 @@
 | 栈 | React 19 + Vite 7 + TypeScript + `@microsoft/power-apps` |
 | 应用名 | [`power.config.json`](../power.config.json) → `SalesCompanion` |
 | 环境 ID | 已写入 `environmentId`（按项目实际校验） |
-| UI | [`src/App.tsx`](../src/App.tsx) 仍为 Vite 模板 |
-| 连接器 / Dataverse | `connectionReferences` / `databaseReferences` 为空 |
+| UI | [`src/App.tsx`](../src/App.tsx) → `AppShell`；五屏 + 任务/客户画像已落地 |
+| 连接器 / Dataverse | `connectionReferences` / `databaseReferences` 仍为空；本地 SoE（localStorage）跑通主路径 |
+| 建表规格 | [13 Dataverse 表字段规格](13-dataverse-table-spec.md) |
 | 文档 | `docs/` 本套件 |
 
 ## Phase 1 成功定义（对本仓库）
@@ -142,6 +159,7 @@ sequenceDiagram
 
 - [05 界面五屏](05-ui-screens.md)
 - [06 数据模型](06-data-model.md)
+- [13 Dataverse 表字段规格](13-dataverse-table-spec.md)
 - [07 SAP 集成](07-integration-sap.md)
 - [08 ALM 交付](08-alm-delivery.md)
 - [09 实施计划](09-implementation-roadmap.md)

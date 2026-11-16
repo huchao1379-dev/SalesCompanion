@@ -1,0 +1,176 @@
+{
+  "accounts": [
+    {
+      "id": "acc-renji",
+      "externalKey": "SAP-ACC-RENJI",
+      "name": "上海仁济医院",
+      "region": "华东",
+      "creditLevel": "A",
+      "lastVisitAt": "2026-04-22T10:00:00.000Z",
+      "visitCount30d": 4,
+      "npsDelta": "+12",
+      "hasMsa": true,
+      "notes": "近 3 次拜访摘要已聚合；信用 A 级、已签 MSA。当前开放商机以监护仪 N17（Identify）为主。"
+    },
+    {
+      "id": "acc-alpha",
+      "externalKey": "SAP-ACC-ALPHA",
+      "name": "Hospital Alpha",
+      "region": "LATAM",
+      "creditLevel": "A",
+      "lastVisitAt": "2026-04-29T14:00:00.000Z",
+      "visitCount30d": 3,
+      "npsDelta": "+8",
+      "hasMsa": true,
+      "notes": "今日拜访关注 A3 演示反馈；ICU 升级评估可能在 6 月启动。"
+    },
+    {
+      "id": "acc-beta",
+      "externalKey": "SAP-ACC-BETA",
+      "name": "Hospital Beta",
+      "region": "LATAM",
+      "creditLevel": "B",
+      "lastVisitAt": "2026-04-10T09:00:00.000Z",
+      "visitCount30d": 2,
+      "npsDelta": "-3",
+      "hasMsa": false,
+      "notes": "N17 商机信心度偏低，建议确认采购窗口。"
+    },
+    {
+      "id": "acc-gamma",
+      "externalKey": "SAP-ACC-GAMMA",
+      "name": "Hospital Gamma",
+      "region": "华东",
+      "creditLevel": "A",
+      "lastVisitAt": "2026-04-28T11:00:00.000Z",
+      "visitCount30d": 1,
+      "npsDelta": "+5",
+      "hasMsa": true,
+      "notes": "昨日 RFP 要点已摘要到拜访卡。"
+    },
+    {
+      "id": "acc-delta",
+      "externalKey": "SAP-ACC-DELTA",
+      "name": "Hospital Delta",
+      "region": "华北",
+      "creditLevel": "B",
+      "lastVisitAt": "2026-03-30T08:00:00.000Z",
+      "visitCount30d": 1,
+      "npsDelta": "0",
+      "hasMsa": false,
+      "notes": "麻醉机报价过期，需重新跟进。"
+    }
+  ],
+  "contacts": [
+    {
+      "id": "con-zhang",
+      "accountId": "acc-renji",
+      "externalKey": "SAP-CON-ZHANG",
+      "name": "张主任",
+      "title": "设备科主任",
+      "phone": ""
+    },
+    {
+      "id": "con-alpha",
+      "accountId": "acc-alpha",
+      "externalKey": "SAP-CON-ALPHA",
+      "name": "Maria Silva",
+      "title": "ICU Manager",
+      "phone": ""
+    }
+  ],
+  "opportunities": [
+    {
+      "id": "opp-n17",
+      "externalKey": "SAP-OPP-N17",
+      "name": "上海仁济医院 · 监护仪 N17",
+      "accountId": "acc-renji",
+      "accountName": "上海仁济医院",
+      "productLine": "监护仪",
+      "productModel": "N17",
+      "quantity": 12,
+      "amount": 144000,
+      "currencyCode": "USD",
+      "stage": "Identify",
+      "confidenceScore": 0.78,
+      "closeDate": "2026-09-30",
+      "syncStatus": "synced",
+      "isSeed": true
+    },
+    {
+      "id": "opp-a1",
+      "externalKey": "SAP-OPP-A1",
+      "name": "Hospital Alpha · A1 监护仪 ×8",
+      "accountId": "acc-alpha",
+      "accountName": "Hospital Alpha",
+      "productLine": "监护仪",
+      "productModel": "A1",
+      "quantity": 8,
+      "amount": 96000,
+      "currencyCode": "USD",
+      "stage": "Identify",
+      "confidenceScore": 0.78,
+      "closeDate": "2026-09-30",
+      "syncStatus": "synced",
+      "isSeed": true
+    },
+    {
+      "id": "opp-beta",
+      "externalKey": "SAP-OPP-BETA-N17",
+      "name": "Hospital Beta · N17",
+      "accountId": "acc-beta",
+      "accountName": "Hospital Beta",
+      "productLine": "监护仪",
+      "productModel": "N17",
+      "quantity": 4,
+      "amount": 48000,
+      "currencyCode": "USD",
+      "stage": "Identify",
+      "confidenceScore": 0.55,
+      "closeDate": "2026-08-15",
+      "syncStatus": "synced",
+      "isSeed": true
+    }
+  ],
+  "orders": [
+    {
+      "id": "ord-alpha-1",
+      "externalKey": "SAP-ORD-ALPHA-001",
+      "name": "Alpha · A1 监护仪订单",
+      "accountId": "acc-alpha",
+      "status": "清关中",
+      "orderedAt": "2026-04-01",
+      "amount": 96000,
+      "currencyCode": "USD"
+    },
+    {
+      "id": "ord-renji-1",
+      "externalKey": "SAP-ORD-RENJI-001",
+      "name": "仁济 · 既往监护仪订单",
+      "accountId": "acc-renji",
+      "status": "已发货",
+      "orderedAt": "2025-11-12",
+      "amount": 72000,
+      "currencyCode": "USD"
+    }
+  ],
+  "shipments": [
+    {
+      "id": "shp-alpha-1",
+      "orderId": "ord-alpha-1",
+      "name": "Alpha 海运批次 A",
+      "status": "清关中",
+      "eta": "2026-05-08",
+      "trackingNo": "MSKU-88421"
+    },
+    {
+      "id": "shp-renji-1",
+      "orderId": "ord-renji-1",
+      "name": "仁济空运批次 R1",
+      "status": "已签收",
+      "eta": "2025-12-01",
+      "trackingNo": "CA-99210"
+    }
+  ],
+  "activities": []
+}

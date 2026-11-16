@@ -1,6 +1,9 @@
 # 06 · 数据模型
 
-**SAP Commerce 仍是 System of Record；Dataverse 仅作 AI / 移动 System of Engagement。**  
+> **Demo 执行请以 [13 建表规格](13-dataverse-table-spec.md) + [14/15 Demo 计划与范围](15-demo-scope-matrix.md) 为准。**  
+> 本文描述**生产愿景**（SAP SoR + VT + Service Bus）。当前环境：**无真实 VT / 无 SB** → 用 Dataverse 普通表 + 种子临时代替；`synced` 仅为模拟回写。
+
+**生产原则（愿景）：** SAP Commerce = System of Record；Dataverse = System of Engagement。  
 读取以 Virtual Tables 为主；写入走草稿三段式后异步回写 SAP。
 
 ## 概念模型
@@ -56,7 +59,8 @@ stateDiagram-v2
 
 ## Dataverse 表（SoE 原生）
 
-命名可按 Solution 发布商前缀调整；下列为逻辑名。
+命名可按 Solution 发布商前缀调整；下列为逻辑名。  
+**Demo 建表（普通表临时代替 VT）见 [13](13-dataverse-table-spec.md)；必做/不做见 [15](15-demo-scope-matrix.md)。** 下列为生产愿景逻辑名，与 Demo 的 `crmai_*` 普通表语义对齐、实现不同。
 
 ### ActivityDraft（活动草稿）
 
@@ -151,6 +155,7 @@ Phase 1 最少覆盖三个核心实体：
 
 ## 相关文档
 
+- [13 Dataverse 表字段规格](13-dataverse-table-spec.md)（建表手册）
 - [02 系统架构](02-system-architecture.md)
 - [07 SAP 集成](07-integration-sap.md)
 - [03 Agent 架构](03-agent-architecture.md)

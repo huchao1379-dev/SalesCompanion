@@ -1,5 +1,7 @@
 # 07 · SAP 集成
 
+> **Demo 期不实施本文。** 当前无真实 Virtual Tables / Service Bus / APIM；用 Dataverse 普通表种子 + `syncstatus=synced` 模拟回写。见 [14](14-demo-plan.md) · [15](15-demo-scope-matrix.md) · [13](13-dataverse-table-spec.md)。本文保留为生产接轨规格。
+
 目标：**不替换 SAP 底座、不对 SAP 做侵入式定制**；读快、写稳、可审计、可补偿。
 
 ## 集成原则

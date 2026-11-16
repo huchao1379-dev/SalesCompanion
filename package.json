@@ -5,9 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:api": "npm --prefix server run dev",
+    "dev:web": "vite",
+    "dev:all": "echo Run two terminals: npm run dev:api  AND  npm run dev",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck:api": "npm --prefix server run typecheck"
   },
   "dependencies": {
     "@microsoft/power-apps": "^1.2.5",

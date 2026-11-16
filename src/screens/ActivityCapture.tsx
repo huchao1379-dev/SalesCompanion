@@ -1,12 +1,21 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { DraftPayload } from '../agents/types'
-import { isMockOrchestrator, orchestrate } from '../agents/orchestratorClient'
+import { getOrchestratorMode, orchestrate } from '../agents/orchestratorClient'
 import { DraftCard } from '../components/DraftCard'
 import { MicButton } from '../components/MicButton'
+import { getAccountInsight } from '../data/accounts'
 import { confirmAndSync, discardDraft, upsertDraft } from '../data/dataverse'
+import {
+  enqueueOfflineUtterance,
+  isOnline,
+  listOfflineUtterances,
+  markOfflineSynced,
+} from '../data/offlineQueue'
 import { useWebSpeech } from '../speech/useWebSpeech'
 
 type Props = {
+  initialDrafts?: DraftPayload[]
+  accountKey?: string
   onDraftsCommitted?: (drafts: DraftPayload[]) => void
   onOpenOpportunity?: () => void
 }
@@ -14,17 +23,33 @@ type Props = {
 const DEMO_UTTERANCE =
   '刚拜访完上海仁济医院张主任，他对监护仪 N17 感兴趣，要 12 台，下周三再约一次定标书细节。'
 
-export function ActivityCapture({ onDraftsCommitted, onOpenOpportunity }: Props) {
+export function ActivityCapture({
+  initialDrafts = [],
+  accountKey,
+  onDraftsCommitted,
+  onOpenOpportunity,
+}: Props) {
   const speech = useWebSpeech()
   const [keyboardMode, setKeyboardMode] = useState(false)
   const [textInput, setTextInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
-  const [drafts, setDrafts] = useState<DraftPayload[]>([])
+  const [drafts, setDrafts] = useState<DraftPayload[]>(() => initialDrafts)
+  const [cardIndex, setCardIndex] = useState(0)
   const [startedAt, setStartedAt] = useState<number | null>(null)
+  const [simulateFail, setSimulateFail] = useState(false)
+  const [offlinePending, setOfflinePending] = useState(
+    () => listOfflineUtterances().filter((u) => !u.synced).length,
+  )
+
+  const contextAccount = useMemo(() => {
+    const fromDraft = drafts.find((d) => d.accountRef)?.accountRef
+    return getAccountInsight(accountKey || fromDraft || 'SAP-ACC-RENJI')
+  }, [accountKey, drafts])
 
   const displayTranscript = speech.transcript || speech.interimTranscript || textInput
   const showFallback = keyboardMode || !speech.supported || Boolean(speech.error)
+  const activeDraft = drafts[cardIndex]
 
   async function runOrchestrator(utterance: string) {
     const trimmed = utterance.trim()
@@ -32,18 +57,58 @@ export function ActivityCapture({ onDraftsCommitted, onOpenOpportunity }: Props)
       setStatus('请先说话或输入拜访内容')
       return
     }
+
+    if (!isOnline()) {
+      enqueueOfflineUtterance(trimmed)
+      setOfflinePending(listOfflineUtterances().filter((u) => !u.synced).length)
+      setStatus('离线：口述已缓存，联网后可补传编排')
+      return
+    }
+
     setBusy(true)
-    setStatus(isMockOrchestrator() ? '编排中（Mock Orchestrator）…' : '编排中…')
+    setStatus(
+      getOrchestratorMode() === 'deepseek'
+        ? '编排中（DeepSeek）…'
+        : '编排中（启发式 / Dataverse 种子）…',
+    )
     const t0 = startedAt ?? Date.now()
     try {
-      const res = await orchestrate({ utterance: trimmed, locale: 'zh-CN' })
+      const res = await orchestrate({
+        utterance: trimmed,
+        locale: 'zh-CN',
+        context: contextAccount
+          ? { accountId: contextAccount.accountRef, accountName: contextAccount.accountName }
+          : undefined,
+      })
       res.drafts.forEach((d) => upsertDraft(d))
       setDrafts(res.drafts)
+      setCardIndex(0)
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
-      setStatus(`草稿已生成 · 耗时 ${elapsed}s（目标 ≤30s）`)
+      setStatus(`草稿已生成 · 耗时 ${elapsed}s（目标 ≤30s）· Agent 延迟 ${res.latencyMs}ms`)
       onDraftsCommitted?.(res.drafts)
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '编排失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function flushOffline() {
+    const pending = listOfflineUtterances().filter((u) => !u.synced)
+    if (!pending.length || !isOnline()) return
+    setBusy(true)
+    try {
+      for (const row of pending) {
+        const res = await orchestrate({ utterance: row.utterance, locale: row.locale })
+        res.drafts.forEach((d) => upsertDraft(d))
+        setDrafts(res.drafts)
+        onDraftsCommitted?.(res.drafts)
+        markOfflineSynced(row.id)
+      }
+      setOfflinePending(listOfflineUtterances().filter((u) => !u.synced).length)
+      setStatus('离线队列已补传并生成草稿')
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '离线补传失败')
     } finally {
       setBusy(false)
     }
@@ -74,16 +139,37 @@ export function ActivityCapture({ onDraftsCommitted, onOpenOpportunity }: Props)
 
   function updateDraft(next: DraftPayload) {
     setDrafts((prev) => prev.map((d) => (d.idempotencyKey === next.idempotencyKey ? next : d)))
-    upsertDraft(next)
+    upsertDraft({ ...next, updatedAt: new Date().toISOString() })
   }
 
   async function handleConfirm(draft: DraftPayload) {
     setBusy(true)
     try {
-      const synced = await confirmAndSync(draft)
+      const synced = await confirmAndSync(draft, { fail: simulateFail })
       setDrafts((prev) => prev.map((d) => (d.idempotencyKey === synced.idempotencyKey ? synced : d)))
-      setStatus(`已确认并同步：${synced.syncStatus}（未直写 SAP UI，模拟 Service Bus）`)
-      if (synced.kind === 'opportunity') onOpenOpportunity?.()
+      setStatus(
+        synced.syncStatus === 'SyncFailed'
+          ? `同步失败：${synced.syncError ?? ''}`
+          : `已确认并同步：${synced.syncStatus}`,
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleConfirmAll() {
+    const pending = drafts.filter((d) => d.syncStatus === 'Draft')
+    if (!pending.length) return
+    setBusy(true)
+    try {
+      const nextList = [...drafts]
+      for (const draft of pending) {
+        const synced = await confirmAndSync(draft, { fail: simulateFail })
+        const idx = nextList.findIndex((d) => d.idempotencyKey === synced.idempotencyKey)
+        if (idx >= 0) nextList[idx] = synced
+      }
+      setDrafts(nextList)
+      setStatus(simulateFail ? '批量确认完成（含模拟失败）' : '全部草稿已确认并同步')
     } finally {
       setBusy(false)
     }
@@ -105,11 +191,22 @@ export function ActivityCapture({ onDraftsCommitted, onOpenOpportunity }: Props)
   async function handleRetry(draft: DraftPayload) {
     setBusy(true)
     try {
-      const synced = await confirmAndSync({ ...draft, syncStatus: 'Draft' })
+      const synced = await confirmAndSync(
+        { ...draft, syncStatus: 'Draft' },
+        { fail: simulateFail },
+      )
       setDrafts((prev) => prev.map((d) => (d.idempotencyKey === synced.idempotencyKey ? synced : d)))
     } finally {
       setBusy(false)
     }
+  }
+
+  function resetForRerecord() {
+    speech.reset()
+    setTextInput('')
+    setDrafts([])
+    setCardIndex(0)
+    setStatus('已清空，可重新录音')
   }
 
   const hasOpportunity = drafts.some((d) => d.kind === 'opportunity')
@@ -122,7 +219,13 @@ export function ActivityCapture({ onDraftsCommitted, onOpenOpportunity }: Props)
         <p className="muted">语音 → 草稿 → 确认。不直写 SAP。</p>
       </header>
 
-      <div className="capture__context">最近 30 天 4 次拜访 · 信用 A · 已签 MSA</div>
+      <div className="capture__context">
+        {contextAccount
+          ? `最近 30 天 ${contextAccount.visitCount30d} 次拜访 · 信用 ${contextAccount.creditRating}${
+              contextAccount.npsDelta ? ` · NPS ${contextAccount.npsDelta}` : ''
+            }${contextAccount.lastContactAt ? ` · 上次接触 ${contextAccount.lastContactAt}` : ''}`
+          : '选择或口述客户后显示拜访上下文'}
+      </div>
 
       <div className="capture__mic">
         <MicButton
@@ -136,19 +239,39 @@ export function ActivityCapture({ onDraftsCommitted, onOpenOpportunity }: Props)
       </div>
 
       <div className="capture__toolbar">
-        <button
-          type="button"
-          className="btn btn--ghost"
-          onClick={() => setKeyboardMode((v) => !v)}
-        >
+        <button type="button" className="btn btn--ghost" onClick={() => setKeyboardMode((v) => !v)}>
           {showFallback ? '收起键盘' : '改用键盘'}
+        </button>
+        <button type="button" className="btn btn--ghost" disabled={busy} onClick={resetForRerecord}>
+          重录
         </button>
         {hasOpportunity ? (
           <button type="button" className="btn btn--ghost" onClick={onOpenOpportunity}>
             查看商机草稿
           </button>
         ) : null}
+        {offlinePending > 0 ? (
+          <button
+            type="button"
+            className="btn btn--ghost"
+            disabled={busy || !isOnline()}
+            onClick={() => {
+              void flushOffline()
+            }}
+          >
+            补传离线（{offlinePending}）
+          </button>
+        ) : null}
       </div>
+
+      <label className="capture__fail-toggle">
+        <input
+          type="checkbox"
+          checked={simulateFail}
+          onChange={(e) => setSimulateFail(e.target.checked)}
+        />
+        模拟 SAP 同步失败（用于验证重试）
+      </label>
 
       {showFallback ? (
         <div className="capture__fallback">
@@ -200,25 +323,58 @@ export function ActivityCapture({ onDraftsCommitted, onOpenOpportunity }: Props)
 
       {status ? <p className="capture__status">{status}</p> : null}
 
-      <div className="draft-list">
-        {drafts.map((d) => (
-          <DraftCard
-            key={d.idempotencyKey}
-            draft={d}
-            busy={busy}
-            onChange={updateDraft}
-            onConfirm={(draft) => {
-              void handleConfirm(draft)
-            }}
-            onDiscard={(draft) => {
-              void handleDiscard(draft)
-            }}
-            onRetry={(draft) => {
-              void handleRetry(draft)
-            }}
-          />
-        ))}
-      </div>
+      {drafts.length > 0 ? (
+        <div className="capture__carousel">
+          <div className="capture__carousel-nav">
+            <button
+              type="button"
+              className="btn btn--ghost"
+              disabled={cardIndex <= 0}
+              onClick={() => setCardIndex((i) => Math.max(0, i - 1))}
+            >
+              ←
+            </button>
+            <span className="muted">
+              {cardIndex + 1} / {drafts.length}
+            </span>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              disabled={cardIndex >= drafts.length - 1}
+              onClick={() => setCardIndex((i) => Math.min(drafts.length - 1, i + 1))}
+            >
+              →
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={busy || !drafts.some((d) => d.syncStatus === 'Draft')}
+              onClick={() => {
+                void handleConfirmAll()
+              }}
+            >
+              全部确认
+            </button>
+          </div>
+          {activeDraft ? (
+            <DraftCard
+              key={activeDraft.idempotencyKey}
+              draft={activeDraft}
+              busy={busy}
+              onChange={updateDraft}
+              onConfirm={(draft) => {
+                void handleConfirm(draft)
+              }}
+              onDiscard={(draft) => {
+                void handleDiscard(draft)
+              }}
+              onRetry={(draft) => {
+                void handleRetry(draft)
+              }}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </section>
   )
 }

@@ -22,6 +22,7 @@ function mergeOpportunityDrafts(
 export function OpportunityDraftScreen({ seedDrafts = [] }: Props) {
   const [stored, setStored] = useState<DraftPayload[]>(() => listDrafts())
   const [busy, setBusy] = useState(false)
+  const [simulateFail, setSimulateFail] = useState(false)
   const drafts = mergeOpportunityDrafts(seedDrafts, stored)
 
   useEffect(() => {
@@ -32,13 +33,13 @@ export function OpportunityDraftScreen({ seedDrafts = [] }: Props) {
 
   function updateDraft(next: DraftPayload) {
     if (next.kind !== 'opportunity') return
-    upsertDraft(next)
+    upsertDraft({ ...next, updatedAt: new Date().toISOString() })
   }
 
   async function handleConfirm(draft: DraftPayload) {
     setBusy(true)
     try {
-      await confirmAndSync(draft)
+      await confirmAndSync(draft, { fail: simulateFail })
     } finally {
       setBusy(false)
     }
@@ -61,8 +62,17 @@ export function OpportunityDraftScreen({ seedDrafts = [] }: Props) {
         <p className="muted">信心度 + 来源 + 一键编辑；写入走草稿三段式。</p>
       </header>
 
+      <label className="capture__fail-toggle">
+        <input
+          type="checkbox"
+          checked={simulateFail}
+          onChange={(e) => setSimulateFail(e.target.checked)}
+        />
+        模拟 SAP 同步失败（用于验证重试）
+      </label>
+
       {drafts.length === 0 ? (
-        <p className="muted">暂无商机草稿。请先在「活动录入」用语音或仁济示例生成。</p>
+        <p className="muted">暂无商机草稿。请先在「活动录入」或「对话」用语音 / 仁济示例生成。</p>
       ) : (
         <div className="draft-list">
           {drafts.map((d) => (

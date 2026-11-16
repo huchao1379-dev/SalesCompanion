@@ -101,7 +101,7 @@ flowchart LR
 
 ## 与 `src/` 模块映射建议
 
-当前 [`src/App.tsx`](../src/App.tsx) 仍为模板。建议后续目录：
+当前仓库已按下列目录落地（[`src/App.tsx`](../src/App.tsx) 挂载 `AppShell`）：
 
 ```
 src/

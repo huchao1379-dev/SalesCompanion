@@ -4,6 +4,23 @@ import { AgentLabel } from './AgentLabel'
 import { SourceChips } from './SourceChips'
 import { SyncStatusBadge } from './SyncStatusBadge'
 
+const VISIT_TYPES = ['Visit', 'Call', 'Demo', 'FollowUp'] as const
+const OPP_STAGES = ['Identify', 'Qualify', 'Propose', 'Negotiate', 'Closed'] as const
+
+function toLocalInput(iso?: string) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function fromLocalInput(value: string) {
+  if (!value) return undefined
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString()
+}
+
 type Props = {
   draft: DraftPayload
   busy?: boolean
@@ -38,6 +55,23 @@ export function DraftCard({ draft, busy, onChange, onConfirm, onDiscard, onRetry
             />
           </label>
           <label>
+            拜访类型
+            <select
+              value={draft.visitType}
+              disabled={!editable}
+              onChange={(e) => onChange({ ...draft, visitType: e.target.value })}
+            >
+              {VISIT_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+              {!VISIT_TYPES.includes(draft.visitType as (typeof VISIT_TYPES)[number]) ? (
+                <option value={draft.visitType}>{draft.visitType}</option>
+              ) : null}
+            </select>
+          </label>
+          <label>
             客户
             <input
               value={draft.accountName}
@@ -62,6 +96,30 @@ export function DraftCard({ draft, busy, onChange, onConfirm, onDiscard, onRetry
               onChange={(e) => onChange({ ...draft, summary: e.target.value })}
             />
           </label>
+          <div className="draft-card__row">
+            <label>
+              开始
+              <input
+                type="datetime-local"
+                value={toLocalInput(draft.scheduledStart)}
+                disabled={!editable}
+                onChange={(e) =>
+                  onChange({ ...draft, scheduledStart: fromLocalInput(e.target.value) })
+                }
+              />
+            </label>
+            <label>
+              结束
+              <input
+                type="datetime-local"
+                value={toLocalInput(draft.scheduledEnd)}
+                disabled={!editable}
+                onChange={(e) =>
+                  onChange({ ...draft, scheduledEnd: fromLocalInput(e.target.value) })
+                }
+              />
+            </label>
+          </div>
           <label>
             下次跟进
             <input
@@ -80,6 +138,14 @@ export function DraftCard({ draft, busy, onChange, onConfirm, onDiscard, onRetry
               value={draft.name}
               disabled={!editable}
               onChange={(e) => onChange({ ...draft, name: e.target.value })}
+            />
+          </label>
+          <label>
+            客户
+            <input
+              value={draft.accountName}
+              disabled={!editable}
+              onChange={(e) => onChange({ ...draft, accountName: e.target.value })}
             />
           </label>
           <label>
@@ -112,16 +178,52 @@ export function DraftCard({ draft, busy, onChange, onConfirm, onDiscard, onRetry
               />
             </label>
           </div>
-          <label>
-            阶段
+          <div className="draft-card__row">
+            <label>
+              阶段
+              <select
+                value={draft.stage}
+                disabled={!editable}
+                onChange={(e) => onChange({ ...draft, stage: e.target.value })}
+              >
+                {OPP_STAGES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+                {!OPP_STAGES.includes(draft.stage as (typeof OPP_STAGES)[number]) ? (
+                  <option value={draft.stage}>{draft.stage}</option>
+                ) : null}
+              </select>
+            </label>
+            <label>
+              预计成交
+              <input
+                type="date"
+                value={draft.closeDate}
+                disabled={!editable}
+                onChange={(e) => onChange({ ...draft, closeDate: e.target.value })}
+              />
+            </label>
+          </div>
+          <label className="draft-card__check">
             <input
-              value={draft.stage}
+              type="checkbox"
+              checked={draft.reuseExisting}
               disabled={!editable}
-              onChange={(e) => onChange({ ...draft, stage: e.target.value })}
+              onChange={(e) => onChange({ ...draft, reuseExisting: e.target.checked })}
             />
+            追加既有商机（不新建）
           </label>
           {draft.reuseExisting ? (
-            <p className="draft-card__hint">追加既有商机：{draft.existingOpportunityRef}</p>
+            <label>
+              既有商机引用
+              <input
+                value={draft.existingOpportunityRef ?? ''}
+                disabled={!editable}
+                onChange={(e) => onChange({ ...draft, existingOpportunityRef: e.target.value })}
+              />
+            </label>
           ) : null}
           {draft.supervisorHints.length > 0 ? (
             <ul className="draft-card__hints">
@@ -143,16 +245,31 @@ export function DraftCard({ draft, busy, onChange, onConfirm, onDiscard, onRetry
       <footer className="draft-card__actions">
         {canConfirm(draft.syncStatus) ? (
           <>
-            <button type="button" className="btn btn--primary" disabled={busy} onClick={() => onConfirm(draft)}>
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={busy}
+              onClick={() => onConfirm(draft)}
+            >
               确认落库
             </button>
-            <button type="button" className="btn btn--ghost" disabled={busy} onClick={() => onDiscard(draft)}>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              disabled={busy}
+              onClick={() => onDiscard(draft)}
+            >
               拒绝
             </button>
           </>
         ) : null}
         {canRetrySync(draft.syncStatus) && onRetry ? (
-          <button type="button" className="btn btn--primary" disabled={busy} onClick={() => onRetry(draft)}>
+          <button
+            type="button"
+            className="btn btn--primary"
+            disabled={busy}
+            onClick={() => onRetry(draft)}
+          >
             重试同步
           </button>
         ) : null}

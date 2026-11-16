@@ -1,83 +1,44 @@
 # SalesCompanion
 
-Power Apps Code App（React + TypeScript + Vite）— 销售 CRM 移动 AI 智能业务伙伴。
+销售 CRM 移动 AI Demo（React + Vite + 自研 Orchestrator）。
 
-**产品与实施文档：** 见 [docs/README.md](docs/README.md)（完整实施计划、架构、Agent、UI、数据模型与 Phase 1 开工指南）。
+**文档：** [docs/README.md](docs/README.md) · 执行范围 [docs/15-demo-scope-matrix.md](docs/15-demo-scope-matrix.md)
 
----
+## 快速启动
 
-# React + TypeScript + Vite
+```bash
+# 1) API（DeepSeek 可选；无 Key 时用启发式 + 种子 Dataverse）
+cd server
+cp .env.example .env   # 可选填 DEEPSEEK_API_KEY
+npm install
+npm run dev
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
-
-It is preconfigured to work with Power Apps Code Apps.
-
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# 2) 前端（另开终端）
+cd ..
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+- 前端：http://localhost:5173  
+- API：http://localhost:8787/api/health  
+- Vite 已代理 `/api` → `8787`
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Demo 能力
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+| 场景 | 说明 |
+| --- | --- |
+| A 拜访录入 | 语音/文本 → 抽取 → 活动+商机草稿 → Confirm → synced |
+| B 客户速览 | 「仁济医院最近怎么样？」 |
+| C 订单物流（选做） | 「查一下仁济医院上个订单的物流」 |
+
+编排：**DeepSeek**（有 Key）或启发式兜底；数据：**Dataverse 种子内存库**（`dataverse/seed/seed.json`）。
+
+## 环境变量（server/.env）
+
+| 变量 | 说明 |
+| --- | --- |
+| `DEEPSEEK_API_KEY` | 可选；不填则启发式 |
+| `DEEPSEEK_MODEL` | 默认 `deepseek-chat` |
+| `DATAVERSE_URL` / `DATAVERSE_TOKEN` | 可选；不填用内存种子 |
+
+无 Copilot Studio、无 AI Builder。

@@ -10,7 +10,11 @@ export function SourceChips({ sources }: Props) {
     <div className="source-chips" aria-label="来源">
       <span className="source-chips__title">来源</span>
       {sources.map((s) => (
-        <span key={`${s.kind}-${s.label}-${s.ref ?? ''}`} className="source-chip" title={s.ref}>
+        <span
+          key={`${s.kind}-${s.label}-${s.ref ?? ''}-${s.id ?? ''}`}
+          className="source-chip"
+          title={[s.entity, s.id || s.ref].filter(Boolean).join(' · ')}
+        >
           {s.label}
         </span>
       ))}
