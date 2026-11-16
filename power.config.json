@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "appId": null,
+  "appDisplayName": "SalesCompanion",
+  "region": "prod",
+  "appType": "CodeApp",
+  "environmentId": "ab13362b-6e0f-ec17-b7a1-6350ce97f38e",
+  "description": " ",
+  "buildPath": "./dist",
+  "buildEntryPoint": "index.html",
+  "localAppUrl": "http://localhost:3000",
+  "logoPath": "Default",
+  "connectionReferences": {},
+  "databaseReferences": {}
+}
