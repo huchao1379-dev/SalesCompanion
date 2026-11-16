@@ -1,3 +1,11 @@
+# SalesCompanion
+
+Power Apps Code App（React + TypeScript + Vite）— 销售 CRM 移动 AI 智能业务伙伴。
+
+**产品与实施文档：** 见 [docs/README.md](docs/README.md)（完整实施计划、架构、Agent、UI、数据模型与 Phase 1 开工指南）。
+
+---
+
 # React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
