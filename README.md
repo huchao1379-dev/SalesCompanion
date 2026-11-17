@@ -49,3 +49,43 @@ npm run dev
 | `DATAVERSE_URL` / `DATAVERSE_TOKEN` | 可选；不填用内存种子 |
 
 无 Copilot Studio、无 AI Builder。
+
+## 线上发布（Power Apps Code App）注意
+
+**只发布前端不够。** 对话 / DeepSeek 跑在独立的 `server/` 上；Code App 静态托管里没有 Node，也没有 Vite 的 `/api` 代理。
+
+| 环境 | 做法 |
+| --- | --- |
+| 本地 | `npm run dev:all` → http://127.0.0.1:5174 |
+| 线上 | ① 把本仓库（至少 `server/` + `dataverse/seed/`）部署到你的服务器 ② 见下方「后端服务器部署」 ③ 构建前端前设 `VITE_API_BASE=https://你的API域名/api` ④ Power Platform CSP `connect-src` 允许该 API 域名（**不要只加** `api.deepseek.com`） |
+
+### 后端服务器部署（Linux + Node + PM2 + Nginx）
+
+```bash
+# 1) 机器上安装 Node 20+，把代码放到例如 /var/www/SalesCompanion
+cd /var/www/SalesCompanion/server
+cp .env.example .env
+# 编辑 .env：HOST=0.0.0.0  PORT=8787  DEEPSEEK_API_KEY=你的密钥
+
+npm install
+npm run build
+npm run start:prod          # 先手动验证
+curl http://127.0.0.1:8787/api/health   # 应 deepseek:true
+
+# 2) 用 PM2 常驻
+npm i -g pm2
+pm2 start ecosystem.config.cjs
+pm2 save && pm2 startup
+
+# 3) Nginx 反代 HTTPS（示例）
+# location /api/ { proxy_pass http://127.0.0.1:8787/api/; ... }
+# 证书可用 certbot
+
+# 4) 本机重新构建前端并发布 Code App
+# Windows:
+set VITE_API_BASE=https://api.你的域名.com/api
+npm run build
+```
+
+健康检查：`https://api.你的域名.com/api/health`  
+浏览器控制台若出现 `connect-src 'none'` / `powerplatformusercontent.com/api/...`，即未配公网 API 或 CSP 未放行。

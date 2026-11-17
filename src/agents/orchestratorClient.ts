@@ -32,7 +32,9 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
   } catch (err) {
     apiReachable = false
     lastMode = 'offline-mock'
-    throw err instanceof Error ? err : new Error('编排服务不可用，请先启动 server')
+    throw err instanceof Error
+      ? err
+      : new Error('编排服务不可用：本地请启动 server；线上请配置 VITE_API_BASE 并部署 API')
   }
 }
 

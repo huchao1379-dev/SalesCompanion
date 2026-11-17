@@ -7,6 +7,8 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') })
 
 export const config = {
   port: Number(process.env.PORT || 8787),
+  /** Local demo: 127.0.0.1. Cloud (Azure etc.): 0.0.0.0 */
+  host: (process.env.HOST || '127.0.0.1').trim() || '127.0.0.1',
   deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() || '',
   deepseekBaseUrl: (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, ''),
   deepseekModel: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
