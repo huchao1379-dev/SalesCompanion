@@ -1,3 +1,4 @@
+import './MicButton.css'
 import { useEffect, useRef, useState } from 'react'
 import { IconMic } from './DashIcons'
 

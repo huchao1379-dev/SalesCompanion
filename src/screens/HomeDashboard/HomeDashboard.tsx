@@ -8,18 +8,19 @@ import {
   IconPhone,
   IconPin,
   IconSun,
-} from '../components/DashIcons'
-import { ProgressRing } from '../components/ProgressRing'
+} from '../../components/DashIcons'
+import { ProgressRing } from '../../components/ProgressRing'
 import {
   buildMonthEvents,
   EVENT_META,
   type AgendaItem,
   type CalEventType,
-} from '../data/agenda'
-import { listDrafts, refreshDraftsFromApi } from '../data/dataverse'
-import { subscribeDrafts } from '../data/draftStore'
-import { computeHomeMetrics, fetchHomeMetrics, type HomeMetrics } from '../data/metrics'
-import { useTheme } from '../theme/ThemeContext'
+} from '../../data/agenda'
+import { listDrafts, refreshDraftsFromApi } from '../../data/dataverse'
+import { subscribeDrafts } from '../../data/draftStore'
+import { computeHomeMetrics, fetchHomeMetrics, type HomeMetrics } from '../../data/metrics'
+import { useTheme } from '../../theme/ThemeContext'
+import './HomeDashboard.css'
 
 /** Mock unread message count for the header badge (no navigation yet). */
 const MOCK_MESSAGE_COUNT = 3

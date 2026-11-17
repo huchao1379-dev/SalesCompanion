@@ -1,7 +1,7 @@
+import './OpportunityDetail.css'
 import { useEffect, useMemo, useState } from 'react'
-import type { OpportunityDraftPayload } from '../agents/types'
+import type { OpportunityDraftPayload } from '../../agents/types'
 import {
-  IconBack,
   IconBuilding,
   IconCheck,
   IconChevronRight,
@@ -12,9 +12,10 @@ import {
   IconRefresh,
   IconSpark,
   IconUser,
-} from '../components/DashIcons'
-import { DraftCard } from '../components/DraftCard'
-import { confirmAndSyncDetailed, discardDraft, upsertDraft } from '../data/dataverse'
+} from '../../components/DashIcons'
+import { DraftCard } from '../../components/DraftCard'
+import { ScreenHeader } from '../../components/ScreenHeader'
+import { confirmAndSyncDetailed, discardDraft, upsertDraft } from '../../data/dataverse'
 import {
   DETAIL_STAGES,
   advanceStageLocally,
@@ -24,9 +25,9 @@ import {
   sentimentLabel,
   type OpportunityDetail,
   type SaveStatus,
-} from '../data/opportunityDetail'
-import { STAGE_LABEL, formatMoney } from '../data/pipeline'
-import { isOnline } from '../data/offlineQueue'
+} from '../../data/opportunityDetail'
+import { STAGE_LABEL, formatMoney } from '../../data/pipeline'
+import { isOnline } from '../../data/offlineQueue'
 
 type Props = {
   opportunityId: string
@@ -181,16 +182,12 @@ export function OpportunityDetailScreen({
   if (loading) {
     return (
       <section className="opp-detail" aria-busy="true">
-        <header className="opp-detail__top">
-          <button type="button" className="opp-detail__icon-btn" aria-label="返回" onClick={onBack}>
-            <IconBack />
-          </button>
-          <div className="opp-detail__heading">
-            <p className="opp-detail__account">加载中</p>
-            <h1>商机详情</h1>
-          </div>
-          <span className="opp-detail__icon-btn is-ghost" aria-hidden />
-        </header>
+        <ScreenHeader
+          className="screen-header--flush"
+          eyebrow="加载中"
+          title="商机详情"
+          onBack={onBack}
+        />
         <div className="opp-detail__skeleton" />
         <div className="opp-detail__skeleton" />
       </section>
@@ -200,15 +197,7 @@ export function OpportunityDetailScreen({
   if (!detail) {
     return (
       <section className="opp-detail">
-        <header className="opp-detail__top">
-          <button type="button" className="opp-detail__icon-btn" aria-label="返回" onClick={onBack}>
-            <IconBack />
-          </button>
-          <div className="opp-detail__heading">
-            <h1>商机详情</h1>
-          </div>
-          <span className="opp-detail__icon-btn is-ghost" aria-hidden />
-        </header>
+        <ScreenHeader className="screen-header--flush" title="商机详情" onBack={onBack} />
         <div className="opp-detail__empty">
           <h2>无法加载商机</h2>
           <p>{error || '记录不存在或离线缓存中没有该商机。'}</p>
@@ -231,89 +220,89 @@ export function OpportunityDetailScreen({
 
   return (
     <section className="opp-detail" aria-label="商机详情">
-      <header className="opp-detail__top">
-        <button type="button" className="opp-detail__icon-btn" aria-label="返回商机列表" onClick={onBack}>
-          <IconBack />
-        </button>
-        <div className="opp-detail__heading">
-          <p className="opp-detail__account">{detail.accountName}</p>
-          <h1>{displayName || detail.name}</h1>
-        </div>
-        <div className="opp-detail__more-wrap">
-          <button
-            type="button"
-            className="opp-detail__icon-btn"
-            aria-label="更多操作"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((v) => !v)}
-          >
-            <IconMore />
-          </button>
-          {menuOpen ? (
-            <div className="opp-detail__menu" role="menu">
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false)
-                  setEditOpen(true)
-                }}
-                disabled={!detail.canEditFields}
-              >
-                编辑字段
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false)
-                  setStatusDetail('生成报价尚未接入报价服务接口')
-                }}
-              >
-                生成报价（未接入）
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false)
-                  setConfirmAction('won')
-                }}
-              >
-                标记赢单
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false)
-                  setConfirmAction('lost')
-                }}
-              >
-                标记输单
-              </button>
-              {detail.draft ? (
+      <ScreenHeader
+        className="screen-header--flush"
+        eyebrow={detail.accountName}
+        title={displayName || detail.name}
+        onBack={onBack}
+        backLabel="返回商机列表"
+        trailing={
+          <div className="opp-detail__more-wrap">
+            <button
+              type="button"
+              className="screen-header__btn"
+              aria-label="更多操作"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              <IconMore />
+            </button>
+            {menuOpen ? (
+              <div className="opp-detail__menu" role="menu">
                 <button
                   type="button"
                   role="menuitem"
-                  className="is-danger"
                   onClick={() => {
                     setMenuOpen(false)
-                    void (async () => {
-                      setBusy(true)
-                      await discardDraft(detail.draft!)
-                      setBusy(false)
-                      onBack()
-                    })()
+                    setEditOpen(true)
+                  }}
+                  disabled={!detail.canEditFields}
+                >
+                  编辑字段
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    setStatusDetail('生成报价尚未接入报价服务接口')
                   }}
                 >
-                  拒绝草稿
+                  生成报价（未接入）
                 </button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </header>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    setConfirmAction('won')
+                  }}
+                >
+                  标记赢单
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    setConfirmAction('lost')
+                  }}
+                >
+                  标记输单
+                </button>
+                {detail.draft ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="is-danger"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      void (async () => {
+                        setBusy(true)
+                        await discardDraft(detail.draft!)
+                        setBusy(false)
+                        onBack()
+                      })()
+                    }}
+                  >
+                    拒绝草稿
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        }
+      />
 
       <div className="opp-detail__status" aria-label="商机状态">
         <div className="opp-detail__status-row">

@@ -1,3 +1,4 @@
+import './SyncStatusBadge.css'
 import type { SyncStatus } from '../agents/types'
 import { SYNC_STATUS_LABEL } from '../data/syncStatus'
 

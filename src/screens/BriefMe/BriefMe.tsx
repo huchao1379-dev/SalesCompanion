@@ -1,3 +1,4 @@
+import './BriefMe.css'
 import {
   useCallback,
   useEffect,
@@ -6,11 +7,12 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { IconBulb, IconClose, IconRefresh, IconSpark } from '../components/DashIcons'
-import { buildBriefChapters, type BriefChapter } from '../data/brief'
-import { listDrafts } from '../data/dataverse'
-import { subscribeDrafts } from '../data/draftStore'
-import { cancelSpeech, speakText, unlockSpeech } from '../speech/tts'
+import { IconBulb, IconClose, IconRefresh, IconSpark } from '../../components/DashIcons'
+import { SheetScrim } from '../../components/SheetScrim'
+import { buildBriefChapters, type BriefChapter } from '../../data/brief'
+import { listDrafts } from '../../data/dataverse'
+import { subscribeDrafts } from '../../data/draftStore'
+import { cancelSpeech, speakText, unlockSpeech } from '../../speech/tts'
 
 type Props = {
   open: boolean
@@ -238,11 +240,9 @@ export function BriefMe({ open, onClose }: Props) {
 
   return (
     <div className="sheet-root" role="presentation">
-      <button
-        type="button"
-        className="sheet-scrim"
-        aria-label="关闭播报"
-        onClick={() => {
+      <SheetScrim
+        label="关闭播报"
+        onClose={() => {
           stopSpeak()
           onClose()
         }}

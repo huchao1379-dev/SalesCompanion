@@ -1,0 +1,706 @@
+/* ActivityCapture */
+
+.capture-screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  /* No top padding — ScreenHeader sits flush; horizontal pad only. */
+  padding: 0 var(--space-4) 1.5rem;
+  background:
+    radial-gradient(120% 70% at 0% -5%, color-mix(in srgb, var(--green-soft) 55%, transparent) 0%, transparent 42%),
+    radial-gradient(90% 55% at 100% 0%, color-mix(in srgb, var(--blue-soft) 70%, transparent) 0%, transparent 45%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-soft) 88%, #dfe8f3) 0%, var(--bg) 100%);
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  min-height: 100%;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.capture-screen > .screen-header {
+  margin: 0 calc(var(--space-4) * -1) 0;
+}
+
+.capture-screen::-webkit-scrollbar {
+  display: none;
+}
+
+.capture-screen__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0.3rem;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.3rem;
+  background: color-mix(in srgb, var(--surface-solid) 92%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: var(--shadow-soft);
+}
+
+.capture-screen__steps li {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-height: 34px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--muted);
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.capture-screen__steps li.is-active {
+  background: var(--green-soft);
+  color: var(--green-deep);
+}
+
+.capture-screen__steps li.is-done {
+  color: var(--green-deep);
+}
+
+.capture-screen__step-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  background: var(--surface-muted);
+  color: inherit;
+  flex-shrink: 0;
+}
+
+.capture-screen__steps li.is-active .capture-screen__step-dot,
+.capture-screen__steps li.is-done .capture-screen__step-dot {
+  background: var(--green);
+  color: #052e16;
+}
+
+.capture-screen__step-dot svg {
+  width: 12px;
+  height: 12px;
+}
+
+.capture-screen__account,
+.capture-screen__hero,
+.capture-screen__ai,
+.capture-screen__fallback,
+.capture-screen__transcript,
+.capture-screen__carousel,
+.capture-screen__empty {
+  background: color-mix(in srgb, var(--surface-solid) 94%, transparent);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+}
+
+.capture-screen__account {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 0.75rem 0.85rem;
+  padding: var(--space-4);
+  align-items: start;
+}
+
+.capture-screen__account-icon,
+.capture-screen__hero-icon,
+.capture-screen__ai-icon,
+.capture-screen__empty-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.capture-screen__account-icon {
+  background: color-mix(in srgb, #14b8a6 18%, var(--surface-muted));
+  color: #0f766e;
+}
+
+:root[data-theme='dark'] .capture-screen__account-icon {
+  color: #5eead4;
+}
+
+.capture-screen__account-body {
+  min-width: 0;
+}
+
+.capture-screen__account-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.capture-screen__account-body strong {
+  display: block;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+
+.capture-screen__account-body p,
+.capture-screen__account-meta {
+  margin-top: 0.2rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.capture-screen__account-meta {
+  color: var(--muted);
+}
+
+.capture-screen__account-chips {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.metric-chip--accent {
+  background: var(--blue-soft);
+  border-color: color-mix(in srgb, var(--blue-ink) 28%, var(--line));
+  color: var(--blue-ink);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capture-screen__hero {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(80% 70% at 50% 78%, color-mix(in srgb, var(--green-soft) 70%, transparent) 0%, transparent 55%),
+    color-mix(in srgb, var(--surface-solid) 94%, transparent);
+}
+
+.capture-screen__hero.is-listening {
+  border-color: color-mix(in srgb, var(--green) 40%, var(--line));
+}
+
+.capture-screen__hero-copy {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+}
+
+.capture-screen__hero-icon {
+  background: var(--blue-soft);
+  color: var(--blue-ink);
+}
+
+.capture-screen__hero-copy h2 {
+  margin: 0;
+  font-size: clamp(1rem, 3.8vw, 1.08rem);
+  line-height: 1.3;
+}
+
+.capture-screen__hero-copy p {
+  margin-top: 0.25rem;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+}
+
+.capture-screen__mic {
+  display: flex;
+  justify-content: center;
+  padding: 0.35rem 0 0.15rem;
+}
+
+.capture-screen__phase {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  font-size: 0.82rem;
+}
+
+.capture-screen__phase strong {
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+}
+
+.capture-screen__phase span {
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.capture-screen__phase--live {
+  background: var(--green-soft);
+  border-color: color-mix(in srgb, var(--green) 35%, var(--line));
+}
+
+.capture-screen__phase--busy {
+  background: var(--warn-soft);
+  border-color: color-mix(in srgb, var(--warn) 40%, var(--line));
+}
+
+.capture-screen__phase--ok {
+  background: color-mix(in srgb, var(--green-soft) 70%, var(--surface-muted));
+  border-color: color-mix(in srgb, var(--green) 28%, var(--line));
+}
+
+.capture-screen__phase--warn {
+  background: var(--warn-soft);
+}
+
+.capture-screen__phase--danger {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface-muted));
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
+}
+
+.capture-screen__phase--danger strong {
+  color: var(--danger);
+}
+
+.capture-screen__rec-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.capture-screen__rec-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+  font-size: 1.05rem;
+  min-width: 3.5ch;
+}
+
+.capture-screen__rec-bar .btn {
+  min-height: 40px;
+  padding: 0.45rem 0.95rem;
+  font-size: 0.85rem;
+}
+
+.capture-screen__privacy {
+  margin: 0;
+  text-align: center;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  max-width: 36ch;
+  align-self: center;
+}
+
+.capture-screen__keyboard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.capture-screen__keyboard-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.capture-screen__keyboard textarea,
+.capture-screen__transcript textarea {
+  width: 100%;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-solid);
+  color: var(--text);
+  padding: 0.7rem 0.85rem;
+  resize: vertical;
+  min-height: 4.5rem;
+}
+
+.capture-screen__mock-banner {
+  margin: 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius-sm);
+  border: 1px dashed color-mix(in srgb, var(--warn) 50%, var(--line));
+  background: var(--warn-soft);
+  color: #92400e;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+:root[data-theme='dark'] .capture-screen__mock-banner {
+  color: #fbbf24;
+}
+
+.capture-screen__drafts {
+  background: color-mix(in srgb, var(--surface-solid) 94%, transparent);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.capture-screen__drafts-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.capture-screen__drafts-head h3 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.capture-screen__drafts-head .btn {
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.82rem;
+}
+
+.capture-screen__draft-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.capture-screen__draft-group h4 {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 750;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+}
+
+.capture-screen__toolbar,
+.capture-screen__fallback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: center;
+}
+
+.capture-screen__toolbar .chip-btn {
+  gap: 0.35rem;
+}
+
+.capture-screen__ai {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+}
+
+.capture-screen__ai.is-busy {
+  border-color: color-mix(in srgb, var(--warn) 35%, var(--line));
+}
+
+.capture-screen__ai-icon {
+  background: var(--warn-soft);
+  color: #a16207;
+}
+
+:root[data-theme='dark'] .capture-screen__ai-icon {
+  color: #fbbf24;
+}
+
+.capture-screen__ai-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.capture-screen__ai-copy strong {
+  display: block;
+  font-size: 0.86rem;
+}
+
+.capture-screen__ai-copy p {
+  margin-top: 0.15rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.capture-screen__fallback {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.capture-screen__fallback-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.capture-screen__fallback-head strong {
+  font-size: 0.9rem;
+}
+
+.capture-screen__fallback textarea,
+.capture-screen__fallback-actions {
+  width: 100%;
+}
+
+.capture-screen__fallback-actions {
+  justify-content: flex-start;
+}
+
+.capture-screen__transcript {
+  padding: var(--space-4);
+}
+
+.capture-screen__transcript-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: 0.45rem;
+}
+
+.capture-screen__transcript p {
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.capture-screen__live {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--green-deep);
+  background: var(--green-soft);
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  animation: pulse-soft 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse-soft {
+  50% {
+    opacity: 0.72;
+  }
+}
+
+.capture-screen__carousel {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.capture-screen__carousel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.capture-screen__carousel-head h3,
+.capture-screen__empty h3 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.capture-screen__carousel-head .btn {
+  flex-shrink: 0;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.82rem;
+}
+
+.capture-screen__carousel-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.capture-screen__dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.capture-screen__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+  cursor: pointer;
+  transition: width 0.15s ease, background 0.15s ease;
+}
+
+.capture-screen__dot.is-active {
+  width: 16px;
+  border-radius: 999px;
+  background: var(--green);
+}
+
+.capture-screen__dot.is-opp.is-active {
+  background: var(--blue-ink);
+}
+
+.capture-screen__page {
+  font-size: 0.78rem;
+  min-width: 3.2ch;
+  text-align: center;
+}
+
+.capture-screen__nav-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.capture-screen__nav-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.capture-screen__empty {
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.capture-screen__empty-icon {
+  background: var(--blue-soft);
+  color: var(--blue-ink);
+  margin-bottom: 0.15rem;
+}
+
+.capture-screen__empty p {
+  max-width: 30ch;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+}
+
+.capture-screen__dev {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.85rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  background: color-mix(in srgb, var(--surface-solid) 55%, transparent);
+}
+
+.capture-screen__dev summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.capture-screen__fail-toggle {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin-top: 0.55rem;
+}
+
+@media (max-width: 430px) {
+  .capture-screen__account-chips .metric-chip--accent {
+    max-width: 12rem;
+  }
+}
+
+@media (max-width: 380px) {
+  .capture-screen {
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+    gap: 0.65rem;
+  }
+
+  .capture-screen > .screen-header {
+    margin-left: calc(var(--space-3) * -1);
+    margin-right: calc(var(--space-3) * -1);
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+  }
+
+  .capture-screen__steps li {
+    gap: 0.2rem;
+    min-height: 32px;
+  }
+
+  .capture-screen__steps li span:last-child {
+    font-size: 0.7rem;
+  }
+
+  .capture-screen__account {
+    grid-template-columns: 36px 1fr;
+    gap: 0.55rem 0.65rem;
+    padding: 0.85rem;
+  }
+
+  .capture-screen__account-icon,
+  .capture-screen__hero-icon,
+  .capture-screen__ai-icon,
+  .capture-screen__empty-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+  }
+
+  .capture-screen__hero,
+  .capture-screen__ai,
+  .capture-screen__fallback,
+  .capture-screen__transcript,
+  .capture-screen__carousel,
+  .capture-screen__empty {
+    padding: 0.85rem;
+  }
+
+  .capture-screen__hero-copy {
+    gap: 0.65rem;
+  }
+
+  .capture-screen__carousel-head,
+  .capture-screen__drafts-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .capture-screen__carousel-head .btn,
+  .capture-screen__drafts-head .btn {
+    width: 100%;
+  }
+
+  .capture-screen__rec-bar .btn {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .capture-screen__privacy {
+    max-width: none;
+  }
+}
+
+@media (min-width: 431px) {
+  .capture-screen__hero {
+    gap: var(--space-4);
+  }
+}
+

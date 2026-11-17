@@ -1,3 +1,4 @@
+import './SourceChips.css'
 import type { SourceRef } from '../agents/types'
 
 type Props = {

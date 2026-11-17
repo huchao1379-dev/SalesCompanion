@@ -1,0 +1,15 @@
+.agent-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.agent-label__name {
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+.agent-label__chain {
+  color: var(--muted);
+  font-size: 0.72rem;
+}

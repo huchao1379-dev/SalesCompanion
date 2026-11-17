@@ -1,5 +1,6 @@
+import './ActivityDetails.css'
 import { useState } from 'react'
-import { LocationSheet } from '../components/LocationSheet'
+import { LocationSheet } from '../../components/LocationSheet'
 import {
   IconBack,
   IconBuilding,
@@ -12,8 +13,8 @@ import {
   IconSpark,
   IconTrash,
   IconUser,
-} from '../components/DashIcons'
-import { EVENT_META, type AgendaItem } from '../data/agenda'
+} from '../../components/DashIcons'
+import { EVENT_META, type AgendaItem } from '../../data/agenda'
 
 type Props = {
   item: AgendaItem

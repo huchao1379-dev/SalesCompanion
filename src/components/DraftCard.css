@@ -1,0 +1,229 @@
+/* DraftCard */
+
+.draft-card {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-soft);
+}
+
+.draft-card--opportunity {
+  border-color: color-mix(in srgb, var(--blue-ink) 22%, var(--line));
+}
+
+.draft-card--activity {
+  border-color: color-mix(in srgb, var(--green) 22%, var(--line));
+}
+
+.draft-card__ribbon {
+  position: absolute;
+  top: 0.75rem;
+  right: -1.6rem;
+  transform: rotate(35deg);
+  background: var(--green);
+  color: #052e16;
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 0.15rem 2rem;
+}
+
+.draft-card__header,
+.draft-card__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.draft-card__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.draft-card__kind {
+  display: inline-flex;
+  align-self: flex-start;
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+}
+
+.draft-card__kind.is-visit {
+  background: var(--green-soft);
+  color: var(--green-deep);
+}
+
+.draft-card__kind.is-opp {
+  background: var(--blue-soft);
+  color: var(--blue-ink);
+}
+
+.draft-card__meta {
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.draft-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.draft-card__body label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.82rem;
+  color: var(--muted);
+  gap: var(--space-1);
+}
+
+.draft-card__body input,
+.draft-card__body textarea,
+.draft-card__body select {
+  width: 100%;
+  margin-top: var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-solid);
+  color: var(--text);
+  padding: 0.7rem 0.85rem;
+}
+
+.draft-card__label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.draft-card__body label.is-uncertain input,
+.draft-card__body label.is-uncertain textarea,
+.draft-card__body label.is-uncertain select {
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--line));
+  background: color-mix(in srgb, var(--warn-soft) 55%, var(--surface-solid));
+}
+
+.field-mark {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.08rem 0.45rem;
+  font-size: 0.66rem;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+}
+
+.field-mark--missing {
+  background: var(--warn-soft);
+  color: #92400e;
+}
+
+.field-mark--low {
+  background: var(--blue-soft);
+  color: var(--blue-ink);
+}
+
+.draft-card__dup {
+  margin: 0.75rem 0 0;
+  padding: 0.75rem 0.85rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+  background: var(--warn-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.draft-card__dup strong {
+  font-size: 0.84rem;
+  color: #92400e;
+}
+
+.draft-card__dup p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.draft-card__dup .chip-btn {
+  align-self: flex-start;
+}
+
+.confidence {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.confidence.is-low {
+  color: #b45309;
+  font-weight: 700;
+}
+
+.draft-card__sap.is-mock {
+  color: #92400e;
+  font-weight: 650;
+}
+
+.draft-card__check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.draft-card__check input {
+  width: auto;
+  margin-top: 0;
+}
+
+.draft-card__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.draft-card__hint,
+.draft-card__sap {
+  margin: var(--space-1) 0 0;
+  color: #b45309;
+  font-size: 0.85rem;
+}
+
+.draft-card__error {
+  color: var(--danger);
+  font-size: 0.85rem;
+}
+
+.draft-card__hints {
+  margin: var(--space-1) 0 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.draft-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.draft-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+@media (max-width: 380px) {
+  .draft-card__row {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,30 +1,31 @@
+import './ActivityCapture.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { DraftPayload } from '../agents/types'
-import { getOrchestratorMode, orchestrate } from '../agents/orchestratorClient'
+import type { DraftPayload } from '../../agents/types'
+import { getOrchestratorMode, orchestrate } from '../../agents/orchestratorClient'
 import {
-  IconBack,
   IconBuilding,
   IconCheck,
   IconEye,
   IconMic,
   IconRefresh,
   IconSpark,
-} from '../components/DashIcons'
-import { DraftCard } from '../components/DraftCard'
-import { MicButton } from '../components/MicButton'
-import { getAccountInsight } from '../data/accounts'
+} from '../../components/DashIcons'
+import { DraftCard } from '../../components/DraftCard'
+import { MicButton } from '../../components/MicButton'
+import { ScreenHeader } from '../../components/ScreenHeader'
+import { getAccountInsight } from '../../data/accounts'
 import {
   confirmAndSyncDetailed,
   discardDraft,
   upsertDraft,
-} from '../data/dataverse'
+} from '../../data/dataverse'
 import {
   enqueueOfflineUtterance,
   isOnline,
   listOfflineUtterances,
   markOfflineSynced,
-} from '../data/offlineQueue'
-import { useWebSpeech } from '../speech/useWebSpeech'
+} from '../../data/offlineQueue'
+import { useWebSpeech } from '../../speech/useWebSpeech'
 
 type Props = {
   initialDrafts?: DraftPayload[]
@@ -455,28 +456,22 @@ export function ActivityCapture({
 
   return (
     <section className="capture-screen" aria-busy={busy}>
-      <header className="capture-screen__top">
-        {onBack ? (
-          <button type="button" className="capture-screen__icon-btn" aria-label="返回" onClick={onBack}>
-            <IconBack />
+      <ScreenHeader
+        eyebrow="现场录入"
+        title="新建拜访"
+        onBack={onBack}
+        trailing={
+          <button
+            type="button"
+            className="screen-header__btn"
+            aria-label="清空重录"
+            disabled={phase === 'processing' || phase === 'submitting'}
+            onClick={resetAll}
+          >
+            <IconRefresh />
           </button>
-        ) : (
-          <span className="capture-screen__icon-btn is-ghost" aria-hidden />
-        )}
-        <div className="capture-screen__title">
-          <p className="home__eyebrow">现场录入</p>
-          <h1>新建拜访</h1>
-        </div>
-        <button
-          type="button"
-          className="capture-screen__icon-btn"
-          aria-label="清空重录"
-          disabled={phase === 'processing' || phase === 'submitting'}
-          onClick={resetAll}
-        >
-          <IconRefresh />
-        </button>
-      </header>
+        }
+      />
 
       <ol className="capture-screen__steps" aria-label="录入进度">
         {STEPS.map((step, i) => (

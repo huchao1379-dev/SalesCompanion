@@ -1,7 +1,7 @@
+import './AccountInsight.css'
 import { useEffect, useId, useMemo, useState } from 'react'
-import { AgentLabel } from '../components/AgentLabel'
+import { AgentLabel } from '../../components/AgentLabel'
 import {
-  IconBack,
   IconBuilding,
   IconChevronRight,
   IconEdit,
@@ -9,9 +9,10 @@ import {
   IconPlus,
   IconRefresh,
   IconUser,
-} from '../components/DashIcons'
-import { SourceChips } from '../components/SourceChips'
-import { SyncStatusBadge } from '../components/SyncStatusBadge'
+} from '../../components/DashIcons'
+import { ScreenHeader } from '../../components/ScreenHeader'
+import { SourceChips } from '../../components/SourceChips'
+import { SyncStatusBadge } from '../../components/SyncStatusBadge'
 import {
   formatAsOf,
   formatProfileMoney,
@@ -20,9 +21,9 @@ import {
   type AccountProfileView,
   type AccountTabId,
   type ProfileInteraction,
-} from '../data/accountProfile'
-import type { SyncStatus } from '../agents/types'
-import { STAGE_LABEL, formatMoney } from '../data/pipeline'
+} from '../../data/accountProfile'
+import type { SyncStatus } from '../../agents/types'
+import { STAGE_LABEL, formatMoney } from '../../data/pipeline'
 
 type Props = {
   accountKey?: string
@@ -156,16 +157,7 @@ export function AccountInsight({
   if (loading && !view) {
     return (
       <section className="account-profile" aria-busy="true" aria-label="客户画像">
-        <header className="account-profile__top">
-          <button type="button" className="account-profile__icon-btn" aria-label="返回" onClick={onBack}>
-            <IconBack />
-          </button>
-          <div className="account-profile__title">
-            <p className="home__eyebrow">客户画像</p>
-            <h1>加载中…</h1>
-          </div>
-          <span className="account-profile__icon-btn is-ghost" aria-hidden />
-        </header>
+        <ScreenHeader className="screen-header--flush" eyebrow="客户画像" title="加载中…" onBack={onBack} />
         <div className="account-profile__state" role="status">
           <div className="account-profile__skeleton" aria-hidden />
           <div className="account-profile__skeleton" aria-hidden />
@@ -178,16 +170,7 @@ export function AccountInsight({
   if (error === 'forbidden') {
     return (
       <section className="account-profile" aria-label="客户画像">
-        <header className="account-profile__top">
-          <button type="button" className="account-profile__icon-btn" aria-label="返回" onClick={onBack}>
-            <IconBack />
-          </button>
-          <div className="account-profile__title">
-            <p className="home__eyebrow">客户画像</p>
-            <h1>无访问权限</h1>
-          </div>
-          <span className="account-profile__icon-btn is-ghost" aria-hidden />
-        </header>
+        <ScreenHeader className="screen-header--flush" eyebrow="客户画像" title="无访问权限" onBack={onBack} />
         <div className="account-profile__empty">
           <p>你没有查看该客户的权限。请联系管理员开通 CRM 访问。</p>
           <button type="button" className="btn btn--ghost" onClick={onBack}>
@@ -201,23 +184,22 @@ export function AccountInsight({
   if (!view) {
     return (
       <section className="account-profile" aria-label="客户画像">
-        <header className="account-profile__top">
-          <button type="button" className="account-profile__icon-btn" aria-label="返回" onClick={onBack}>
-            <IconBack />
-          </button>
-          <div className="account-profile__title">
-            <p className="home__eyebrow">客户画像</p>
-            <h1>未找到客户</h1>
-          </div>
-          <button
-            type="button"
-            className="account-profile__icon-btn"
-            aria-label="重试"
-            onClick={() => void reload()}
-          >
-            <IconRefresh />
-          </button>
-        </header>
+        <ScreenHeader
+          className="screen-header--flush"
+          eyebrow="客户画像"
+          title="未找到客户"
+          onBack={onBack}
+          trailing={
+            <button
+              type="button"
+              className="screen-header__btn"
+              aria-label="重试"
+              onClick={() => void reload()}
+            >
+              <IconRefresh />
+            </button>
+          }
+        />
         <div className="account-profile__empty">
           <p>{error === 'network' ? '网络异常且无可用 Mock。' : '未找到客户画像。'}</p>
           <div className="account-profile__empty-actions">
@@ -239,23 +221,22 @@ export function AccountInsight({
 
   return (
     <section className="account-profile" aria-label={`客户画像 · ${h.name}`} aria-busy={loading}>
-      <header className="account-profile__top">
-        <button type="button" className="account-profile__icon-btn" aria-label="返回" onClick={onBack}>
-          <IconBack />
-        </button>
-        <div className="account-profile__title">
-          <p className="home__eyebrow">客户画像</p>
-          <h1>客户详情</h1>
-        </div>
-        <button
-          type="button"
-          className="account-profile__icon-btn"
-          aria-label="刷新"
-          onClick={() => void reload()}
-        >
-          <IconRefresh />
-        </button>
-      </header>
+      <ScreenHeader
+        className="screen-header--flush"
+        eyebrow="客户画像"
+        title="客户详情"
+        onBack={onBack}
+        trailing={
+          <button
+            type="button"
+            className="screen-header__btn"
+            aria-label="刷新"
+            onClick={() => void reload()}
+          >
+            <IconRefresh />
+          </button>
+        }
+      />
 
       {view.dataOrigin === 'mock' || offline || error === 'network' ? (
         <p className="account-profile__banner account-profile__banner--mock" role="status">

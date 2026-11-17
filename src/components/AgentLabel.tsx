@@ -1,3 +1,5 @@
+import './AgentLabel.css'
+
 type Props = {
   name: string
   chain?: string[]

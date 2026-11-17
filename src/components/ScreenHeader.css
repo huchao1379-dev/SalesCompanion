@@ -1,0 +1,122 @@
+/* Shared sticky screen header (capture / opportunity / account / …) */
+
+.screen-header {
+  display: grid;
+  grid-template-columns: 40px 1fr 40px;
+  align-items: center;
+  gap: var(--space-3);
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  margin: calc(var(--space-3) * -1) calc(var(--space-4) * -1) 0;
+  padding: var(--space-3) var(--space-4);
+  background: color-mix(in srgb, var(--bg-soft) 88%, transparent);
+  backdrop-filter: var(--blur);
+  border-bottom: 1px solid var(--line);
+}
+
+.screen-header__title {
+  text-align: center;
+  min-width: 0;
+}
+
+.screen-header__title h1 {
+  font-size: clamp(1.05rem, 4.2vw, 1.22rem);
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.screen-header__eyebrow {
+  margin: 0 0 0.1rem;
+  color: var(--green-deep);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.screen-header__btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--surface-solid) 82%, transparent);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease, color 0.15s ease;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.screen-header__btn:hover {
+  background: var(--surface-solid);
+  color: var(--text);
+}
+
+.screen-header__btn:active {
+  transform: scale(0.96);
+}
+
+.screen-header__btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.screen-header__btn.is-ghost {
+  visibility: hidden;
+  pointer-events: none;
+  border: none;
+  background: transparent;
+}
+
+.screen-header__btn.is-accent {
+  background: var(--green-soft);
+  border-color: color-mix(in srgb, var(--green) 35%, var(--line));
+  color: var(--green-deep);
+}
+
+/* Used when the screen body already pads horizontally (account / opp detail). */
+.screen-header--flush {
+  margin: 0 calc(var(--space-4) * -1);
+  padding: 0.7rem var(--space-4);
+  background: color-mix(in srgb, var(--bg-soft) 96%, var(--surface-solid));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--line) 80%, transparent);
+}
+
+.screen-header--flush .screen-header__title h1 {
+  font-size: clamp(0.98rem, 3.8vw, 1.12rem);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.screen-header--flush .screen-header__eyebrow {
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  text-transform: none;
+  font-weight: 650;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.screen-header--flush .screen-header__btn {
+  border-radius: 12px;
+  border-color: var(--line);
+  background: var(--surface-solid);
+  color: var(--text);
+}
+
+@media (max-width: 380px) {
+  .screen-header:not(.screen-header--flush) {
+    margin-left: calc(var(--space-3) * -1);
+    margin-right: calc(var(--space-3) * -1);
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+  }
+}

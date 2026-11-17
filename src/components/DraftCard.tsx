@@ -1,3 +1,4 @@
+import './DraftCard.css'
 import type { DraftPayload, OpportunityDraftPayload } from '../agents/types'
 import { canConfirm, canEditDraft, canRetrySync } from '../data/syncStatus'
 import { AgentLabel } from './AgentLabel'

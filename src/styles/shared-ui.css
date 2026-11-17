@@ -1,0 +1,97 @@
+/* Shared UI primitives used across screens */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.screen > header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.home__eyebrow {
+  margin: 0;
+  color: var(--green-deep);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.home__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.btn {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0.62rem 1.05rem;
+  cursor: pointer;
+  color: var(--text);
+  background: var(--surface-solid);
+  border-color: var(--line);
+  font-weight: 600;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--primary);
+  border-color: transparent;
+  color: #fff;
+}
+
+.btn--accent {
+  background: var(--green);
+  border-color: transparent;
+  color: #053318;
+  font-weight: 700;
+}
+
+.btn--ghost {
+  background: transparent;
+}
+
+.metric-chip,
+.chip-btn {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  font-size: 0.78rem;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+
+.chip-btn {
+  cursor: pointer;
+  text-align: left;
+}
+
+.chip-btn.is-active {
+  border-color: var(--green);
+  color: var(--green-deep);
+  background: var(--green-soft);
+}

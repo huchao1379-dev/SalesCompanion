@@ -1,0 +1,161 @@
+/* Copilot bottom dock */
+
+.copilot-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.7rem 0.9rem calc(0.75rem + var(--dock-bottom-inset));
+  background: rgba(248, 250, 252, 0.92);
+  border-top: 1px solid var(--line);
+  backdrop-filter: blur(16px);
+}
+
+.copilot-dock--compact {
+  gap: 0;
+  padding-top: 0.55rem;
+}
+
+.copilot-dock--activity {
+  gap: 0.75rem;
+  padding-top: 0;
+  background: linear-gradient(180deg, transparent 0%, rgba(238, 243, 248, 0.92) 28%, #fff 55%);
+  border-top: none;
+  pointer-events: none;
+}
+
+.copilot-dock--activity .copilot-dock__float-actions,
+.copilot-dock--activity .copilot-dock__composer {
+  pointer-events: auto;
+}
+
+.copilot-dock__float-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+  padding: 0 0.15rem;
+  transform: translateY(0);
+}
+
+.copilot-dock__actions {
+  display: flex;
+  gap: 0.45rem;
+  justify-content: space-between;
+}
+
+.copilot-chip {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 0.55rem 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.copilot-chip:hover {
+  background: #fff;
+  border-color: rgba(17, 24, 39, 0.18);
+  color: var(--text);
+}
+
+.copilot-dock__composer {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 48px;
+  padding: 0.35rem 0.45rem 0.35rem 0.65rem;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.08), 0 8px 22px rgba(15, 23, 42, 0.06);
+}
+
+.copilot-dock__composer input {
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  /* 16px prevents iOS Safari focus-zoom that creates page scrollbars */
+  font-size: 16px;
+  min-width: 0;
+  width: 100%;
+  padding: 0.35rem 0.2rem;
+}
+
+.copilot-dock__composer input::placeholder {
+  color: var(--muted);
+}
+
+.copilot-dock__attach,
+.copilot-dock__send {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background: transparent;
+  color: var(--muted);
+}
+
+.copilot-dock__send {
+  background: rgba(17, 24, 39, 0.06);
+  color: var(--text-secondary);
+}
+
+.copilot-dock__send:hover {
+  background: rgba(17, 24, 39, 0.1);
+  color: var(--text);
+}
+
+.copilot-dock__attach:hover {
+  color: var(--text);
+}
+
+:root[data-theme='dark'] .copilot-dock__composer,
+:root[data-theme='dark'] .copilot-chip {
+  background: var(--surface-solid);
+  border-color: var(--line-strong);
+  color: var(--text-secondary);
+}
+
+.activity-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  border: 1.5px solid #14b8a6;
+  background: #fff;
+  color: #0f766e;
+  font-weight: 700;
+  font-size: 0.9rem;
+  padding: 0.72rem 0.8rem;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+.activity-action-btn:hover {
+  background: rgba(20, 184, 166, 0.08);
+}
+
+:root[data-theme='dark'] .copilot-dock {
+  background: color-mix(in srgb, var(--bg-soft) 92%, transparent);
+  border-top-color: var(--line);
+}

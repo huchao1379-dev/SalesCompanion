@@ -1,3 +1,4 @@
+import './LocationSheet.css'
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -7,6 +8,7 @@ import {
   IconClose,
   IconPhone,
 } from './DashIcons'
+import { SheetScrim } from './SheetScrim'
 import { EVENT_META, type AgendaItem, type CalEventType } from '../data/agenda'
 
 export type LocationVisit = {
@@ -63,7 +65,7 @@ export function LocationSheet({ open, item, relatedVisits, onClose }: Props) {
 
   const sheet = (
     <div className="sheet-root location-sheet-root" role="presentation">
-      <button type="button" className="sheet-scrim" aria-label="关闭地点信息" onClick={onClose} />
+      <SheetScrim label="关闭地点信息" onClose={onClose} />
       <section className="location-sheet" role="dialog" aria-modal="true" aria-label="地点相关信息">
         <header className="location-sheet__head">
           <span className="location-sheet__org-icon" aria-hidden>

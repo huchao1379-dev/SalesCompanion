@@ -1,22 +1,23 @@
+import './CopilotChat.css'
 import { useEffect, useRef, useState } from 'react'
-import type { AgentMessage, DraftPayload } from '../agents/types'
-import { getOrchestratorMode, orchestrate } from '../agents/orchestratorClient'
-import { AgentLabel } from '../components/AgentLabel'
-import { DraftCard } from '../components/DraftCard'
+import type { AgentMessage, DraftPayload } from '../../agents/types'
+import { getOrchestratorMode, orchestrate } from '../../agents/orchestratorClient'
+import { AgentLabel } from '../../components/AgentLabel'
+import { DraftCard } from '../../components/DraftCard'
 import {
   IconBack,
   IconMic,
   IconPaperclip,
   IconSendUp,
-} from '../components/DashIcons'
-import { SourceChips } from '../components/SourceChips'
+} from '../../components/DashIcons'
+import { SourceChips } from '../../components/SourceChips'
 import {
   appendMessages,
   clearConversation,
   loadConversation,
-} from '../data/conversationStore'
-import { confirmAndSync, discardDraft, upsertDraft } from '../data/dataverse'
-import { useWebSpeech } from '../speech/useWebSpeech'
+} from '../../data/conversationStore'
+import { confirmAndSync, discardDraft, upsertDraft } from '../../data/dataverse'
+import { useWebSpeech } from '../../speech/useWebSpeech'
 
 type Props = {
   initialPrompt?: string

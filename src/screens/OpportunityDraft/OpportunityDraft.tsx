@@ -1,14 +1,15 @@
+import './OpportunityDraft.css'
 import { useEffect, useMemo, useState } from 'react'
-import type { DraftPayload, OpportunityDraftPayload } from '../agents/types'
+import type { DraftPayload, OpportunityDraftPayload } from '../../agents/types'
 import {
-  IconBack,
   IconCheck,
   IconPlus,
   IconSpark,
-} from '../components/DashIcons'
-import { DraftCard } from '../components/DraftCard'
-import { confirmAndSyncDetailed, discardDraft, upsertDraft } from '../data/dataverse'
-import { subscribeDrafts } from '../data/draftStore'
+} from '../../components/DashIcons'
+import { DraftCard } from '../../components/DraftCard'
+import { ScreenHeader } from '../../components/ScreenHeader'
+import { confirmAndSyncDetailed, discardDraft, upsertDraft } from '../../data/dataverse'
+import { subscribeDrafts } from '../../data/draftStore'
 import {
   STAGE_LABEL,
   SENTIMENT_LABEL,
@@ -19,7 +20,7 @@ import {
   type PipelineItem,
   type PipelineRisk,
   type PipelineSnapshot,
-} from '../data/pipeline'
+} from '../../data/pipeline'
 
 type Props = {
   seedDrafts?: DraftPayload[]
@@ -223,27 +224,21 @@ export function OpportunityDraftScreen({
 
   return (
     <section className="opp-screen" aria-busy={loading}>
-      <header className="opp-screen__top">
-        {onBack ? (
-          <button type="button" className="opp-screen__icon-btn" aria-label="返回" onClick={onBack}>
-            <IconBack />
+      <ScreenHeader
+        eyebrow="管线"
+        title="商机"
+        onBack={onBack}
+        trailing={
+          <button
+            type="button"
+            className="screen-header__btn is-accent"
+            aria-label="创建商机"
+            onClick={createBlankDraft}
+          >
+            <IconPlus />
           </button>
-        ) : (
-          <span className="opp-screen__icon-btn is-ghost" aria-hidden />
-        )}
-        <div className="opp-screen__title">
-          <p className="home__eyebrow">管线</p>
-          <h1>商机</h1>
-        </div>
-        <button
-          type="button"
-          className="opp-screen__icon-btn is-accent"
-          aria-label="创建商机"
-          onClick={createBlankDraft}
-        >
-          <IconPlus />
-        </button>
-      </header>
+        }
+      />
 
       <article className="opp-screen__summary" aria-label="管线摘要">
         <div className="opp-screen__summary-grid" role="list">

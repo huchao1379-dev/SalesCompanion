@@ -1,24 +1,16 @@
-import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { DraftPayload, OpportunityDraftPayload } from '../agents/types'
-import {
-  IconBrief,
-  IconCheck,
-  IconEdit,
-  IconEye,
-  IconPaperclip,
-  IconPlus,
-  IconSendUp,
-} from '../components/DashIcons'
+import { CopilotDock } from '../components/CopilotDock'
 import type { AgendaItem } from '../data/agenda'
-import { AccountInsight } from '../screens/AccountInsight'
-import { ActivityCapture } from '../screens/ActivityCapture'
-import { ActivityDetails } from '../screens/ActivityDetails'
-import { BriefMe } from '../screens/BriefMe'
-import { CopilotChat } from '../screens/CopilotChat'
-import { HomeDashboard } from '../screens/HomeDashboard'
-import { OpportunityDetailScreen } from '../screens/OpportunityDetail'
-import { OpportunityDraftScreen } from '../screens/OpportunityDraft'
-import { TasksHub } from '../screens/TasksHub'
+import { AccountInsight } from '../screens/AccountInsight/AccountInsight'
+import { ActivityCapture } from '../screens/ActivityCapture/ActivityCapture'
+import { ActivityDetails } from '../screens/ActivityDetails/ActivityDetails'
+import { BriefMe } from '../screens/BriefMe/BriefMe'
+import { CopilotChat } from '../screens/CopilotChat/CopilotChat'
+import { HomeDashboard } from '../screens/HomeDashboard/HomeDashboard'
+import { OpportunityDetailScreen } from '../screens/OpportunityDetail/OpportunityDetail'
+import { OpportunityDraftScreen } from '../screens/OpportunityDraft/OpportunityDraft'
+import { TasksHub } from '../screens/TasksHub/TasksHub'
 import { ensureVoices, unlockSpeech } from '../speech/tts'
 import { useBrowserBottomInset } from './useBrowserBottomInset'
 
@@ -77,25 +69,12 @@ export function AppShell() {
     goScreen('chat')
   }
 
-  function submitCopilot() {
-    openChat(copilotDraft.trim())
-  }
-
-  function onCopilotKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      submitCopilot()
-    }
-  }
-
-  function onCopilotSubmit(e: FormEvent) {
-    e.preventDefault()
-    submitCopilot()
-  }
-
   const onBoard = screen === 'home'
   const showDock =
     !(onBoard && insightsOpen) && screen !== 'chat' && screen !== 'opportunity-detail'
+
+  const dockMode =
+    screen === 'activity' ? 'activity' : screen === 'capture' || screen === 'opportunity' ? 'compact' : 'default'
 
   const activityDateLabel = useMemo(() => {
     if (!activityItem) return ''
@@ -240,66 +219,19 @@ export function AppShell() {
       {onBoard ? <BriefMe open={insightsOpen} onClose={() => setInsightsOpen(false)} /> : null}
 
       {showDock ? (
-        <div
-          className={`copilot-dock${screen === 'activity' ? ' copilot-dock--activity' : ''}${
-            screen === 'capture' || screen === 'opportunity' ? ' copilot-dock--compact' : ''
-          }`}
-          aria-label="快捷栏"
-        >
-          {screen === 'activity' ? (
-            <div className="copilot-dock__float-actions">
-              <button type="button" className="activity-action-btn">
-                <IconCheck /> 完成
-              </button>
-              <button type="button" className="activity-action-btn">
-                <IconEdit /> 编辑
-              </button>
-            </div>
-          ) : screen === 'capture' || screen === 'opportunity' ? null : (
-            <div className="copilot-dock__actions">
-              <button type="button" className="copilot-chip" onClick={() => goScreen('capture')}>
-                <IconPlus />
-                新建拜访
-              </button>
-              <button type="button" className="copilot-chip" onClick={() => goScreen('opportunity')}>
-                <IconEye />
-                查看商机
-              </button>
-              <button
-                type="button"
-                className="copilot-chip"
-                onClick={() => {
-                  unlockSpeech()
-                  goScreen('home')
-                  setInsightsOpen(true)
-                }}
-              >
-                <IconBrief />
-                智能简报
-              </button>
-            </div>
-          )}
-
-          <form className="copilot-dock__composer" onSubmit={onCopilotSubmit}>
-            <button type="button" className="copilot-dock__attach" aria-label="添加附件">
-              <IconPaperclip />
-            </button>
-            <input
-              value={copilotDraft}
-              onChange={(e) => setCopilotDraft(e.target.value)}
-              onFocus={() => openChat(copilotDraft)}
-              onPointerUp={() => openChat(copilotDraft)}
-              onKeyDown={onCopilotKeyDown}
-              placeholder="问 Copilot…"
-              aria-label="问 Copilot"
-              readOnly
-              inputMode="none"
-            />
-            <button type="submit" className="copilot-dock__send" aria-label="打开对话">
-              <IconSendUp />
-            </button>
-          </form>
-        </div>
+        <CopilotDock
+          mode={dockMode}
+          draft={copilotDraft}
+          onDraftChange={setCopilotDraft}
+          onOpenCapture={() => goScreen('capture')}
+          onOpenOpportunity={() => goScreen('opportunity')}
+          onOpenBrief={() => {
+            unlockSpeech()
+            goScreen('home')
+            setInsightsOpen(true)
+          }}
+          onOpenChat={openChat}
+        />
       ) : null}
     </div>
   )

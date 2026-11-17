@@ -1,10 +1,11 @@
+import './TasksHub.css'
 import { useEffect, useState, type ReactNode } from 'react'
-import type { AgentInvocationRecord, DraftPayload } from '../agents/types'
-import { api } from '../api/client'
-import { SyncStatusBadge } from '../components/SyncStatusBadge'
-import { listDrafts, refreshDraftsFromApi } from '../data/dataverse'
-import { subscribeDrafts } from '../data/draftStore'
-import { listInvocations } from '../data/invocationLog'
+import type { AgentInvocationRecord, DraftPayload } from '../../agents/types'
+import { api } from '../../api/client'
+import { SyncStatusBadge } from '../../components/SyncStatusBadge'
+import { listDrafts, refreshDraftsFromApi } from '../../data/dataverse'
+import { subscribeDrafts } from '../../data/draftStore'
+import { listInvocations } from '../../data/invocationLog'
 
 type Props = {
   onOpenCapture: () => void
