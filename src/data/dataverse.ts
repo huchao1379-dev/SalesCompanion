@@ -72,10 +72,25 @@ export function updateDraftStatus(
   return next
 }
 
+export type ConfirmSyncResult = {
+  draft: DraftPayload
+  /** true when API confirm succeeded; false when local mock fallback was used */
+  viaApi: boolean
+}
+
 export async function confirmAndSync(
   draft: DraftPayload,
   options?: { fail?: boolean },
 ): Promise<DraftPayload> {
+  const result = await confirmAndSyncDetailed(draft, options)
+  return result.draft
+}
+
+/** Prefer this when UI needs to distinguish real API sync vs local mock. */
+export async function confirmAndSyncDetailed(
+  draft: DraftPayload,
+  options?: { fail?: boolean },
+): Promise<ConfirmSyncResult> {
   upsertDraft({ ...draft, syncStatus: 'Confirmed', syncError: undefined })
   try {
     const synced = (await api.confirmDraft(draft.idempotencyKey, options?.fail)) as DraftPayload
@@ -84,24 +99,24 @@ export async function confirmAndSync(
     if (idx >= 0) store.drafts[idx] = synced
     else store.drafts.unshift(synced)
     writeLocal(store)
-    return synced
+    return { draft: synced, viaApi: true }
   } catch {
-    // Local simulation fallback
+    // Local simulation fallback — clearly marked MOCK so UI never pretends API succeeded
     updateDraftStatus(draft.idempotencyKey, 'Syncing')
     await delay(900)
     if (options?.fail) {
-      return (
+      const failed =
         updateDraftStatus(draft.idempotencyKey, 'SyncFailed', {
-          syncError: 'SAP 校验失败（模拟）：请检查数量与客户信用后重试',
+          syncError: '【本地模拟】SAP 校验失败：请检查数量与客户信用后重试',
         } as Partial<DraftPayload>) ?? draft
-      )
+      return { draft: failed, viaApi: false }
     }
-    return (
+    const synced =
       updateDraftStatus(draft.idempotencyKey, 'Synced', {
-        sapExternalId: `SAP-${Date.now().toString(36).toUpperCase()}`,
+        sapExternalId: `MOCK-SAP-${Date.now().toString(36).toUpperCase()}`,
         syncError: undefined,
       } as Partial<DraftPayload>) ?? draft
-    )
+    return { draft: synced, viaApi: false }
   }
 }
 

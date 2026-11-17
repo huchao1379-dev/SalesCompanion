@@ -4,9 +4,10 @@ import {
   IconBook,
   IconCalendar,
   IconChevronRight,
-  IconGear,
+  IconMoon,
   IconPhone,
   IconPin,
+  IconSun,
 } from '../components/DashIcons'
 import { ProgressRing } from '../components/ProgressRing'
 import {
@@ -18,6 +19,10 @@ import {
 import { listDrafts, refreshDraftsFromApi } from '../data/dataverse'
 import { subscribeDrafts } from '../data/draftStore'
 import { computeHomeMetrics, fetchHomeMetrics, type HomeMetrics } from '../data/metrics'
+import { useTheme } from '../theme/ThemeContext'
+
+/** Mock unread message count for the header badge (no navigation yet). */
+const MOCK_MESSAGE_COUNT = 3
 
 type Props = {
   dimmed?: boolean
@@ -87,16 +92,19 @@ function buildMonthGrid(now: Date, events: AgendaItem[]) {
 export function HomeDashboard({
   dimmed = false,
   onOpenBrief: _onOpenBrief,
-  onOpenCapture,
-  onOpenChat,
-  onOpenTasks,
-  onOpenAccount,
+  onOpenCapture: _onOpenCapture,
+  onOpenChat: _onOpenChat,
+  onOpenTasks: _onOpenTasks,
+  onOpenAccount: _onOpenAccount,
   onOpenActivity,
 }: Props) {
+  const { theme, toggleTheme } = useTheme()
   const [now, setNow] = useState(() => new Date())
   const [metrics, setMetrics] = useState<HomeMetrics>(() => computeHomeMetrics(listDrafts()))
   const [selectedDay, setSelectedDay] = useState(() => new Date().getDate())
   const [agendaOpen, setAgendaOpen] = useState(false)
+  const messageCount = MOCK_MESSAGE_COUNT
+  const messageBadge = messageCount > 99 ? '99+' : String(messageCount)
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000)
@@ -165,7 +173,6 @@ export function HomeDashboard({
   const momentumUp = 65
   const momentumDown = 15
   const momentumPct = Math.round((momentumUp / momentumDown) * 100)
-
   const overdue = Math.max(metrics.openDrafts + metrics.pendingSync, metrics.riskOpportunities, 3)
 
   return (
@@ -176,20 +183,24 @@ export function HomeDashboard({
           <h1 className="dash__time">{formatClock(now)}</h1>
         </div>
         <div className="dash__actions" aria-label="快捷入口">
-          <button type="button" className="icon-btn" aria-label="目录" onClick={onOpenChat}>
+          <button type="button" className="icon-btn" aria-label="目录">
             <IconBook />
           </button>
-          <button type="button" className="icon-btn icon-btn--badge" aria-label="通知" onClick={onOpenTasks}>
+          <button
+            type="button"
+            className="icon-btn icon-btn--badge"
+            aria-label={`消息 ${messageBadge} 条`}
+          >
             <IconBell />
-            {overdue > 0 ? <span className="icon-btn__dot" /> : null}
+            {messageCount > 0 ? <span className="icon-btn__count">{messageBadge}</span> : null}
           </button>
           <button
             type="button"
             className="icon-btn"
-            aria-label="设置"
-            onClick={onOpenAccount ?? onOpenCapture}
+            aria-label={theme === 'dark' ? '切换为浅色模式' : '切换为深色模式'}
+            onClick={toggleTheme}
           >
-            <IconGear />
+            {theme === 'dark' ? <IconSun /> : <IconMoon />}
           </button>
         </div>
       </header>

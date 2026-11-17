@@ -48,6 +48,12 @@ export const api = {
     }>('/metrics'),
   accounts: () => request<{ accounts: unknown[] }>('/accounts'),
   account: (id: string) => request(`/accounts/${encodeURIComponent(id)}`),
+  opportunities: () =>
+    request<{
+      opportunities: unknown[]
+      dataSource: string
+      note?: string
+    }>('/opportunities'),
   logs: () => request<{ logs: unknown[] }>('/logs'),
 }
 

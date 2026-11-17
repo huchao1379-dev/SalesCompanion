@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
+import { IconMic } from './DashIcons'
 
 type Props = {
   listening: boolean
   disabled?: boolean
-  onPressStart: () => void
-  onPressEnd: () => void
-  label?: string
+  /** Tap to start when idle; tap again to stop when listening. */
+  onToggle: () => void
+  elapsedSeconds?: number
+  idleLabel?: string
 }
 
 function formatElapsed(seconds: number) {
@@ -17,27 +19,28 @@ function formatElapsed(seconds: number) {
 export function MicButton({
   listening,
   disabled,
-  onPressStart,
-  onPressEnd,
-  label = '按住说话',
+  onToggle,
+  elapsedSeconds = 0,
+  idleLabel = '点击开始录音',
 }: Props) {
-  const [elapsed, setElapsed] = useState(0)
+  const [localElapsed, setLocalElapsed] = useState(0)
   const startedRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (!listening) {
       startedRef.current = null
+      setLocalElapsed(0)
       return
     }
-    startedRef.current = Date.now()
+    startedRef.current = Date.now() - elapsedSeconds * 1000
     const id = window.setInterval(() => {
       if (startedRef.current == null) return
-      setElapsed(Math.floor((Date.now() - startedRef.current) / 1000))
+      setLocalElapsed(Math.floor((Date.now() - startedRef.current) / 1000))
     }, 200)
     return () => window.clearInterval(id)
-  }, [listening])
+  }, [listening, elapsedSeconds])
 
-  const displayElapsed = listening ? elapsed : 0
+  const displayElapsed = listening ? Math.max(localElapsed, elapsedSeconds) : 0
 
   return (
     <button
@@ -45,19 +48,10 @@ export function MicButton({
       className={`mic-button${listening ? ' mic-button--listening' : ''}`}
       disabled={disabled}
       aria-pressed={listening}
-      aria-label={listening ? '松开结束录音' : label}
-      onPointerDown={(e) => {
+      aria-label={listening ? `停止录音，已录 ${formatElapsed(displayElapsed)}` : idleLabel}
+      onClick={(e) => {
         e.preventDefault()
-        ;(e.currentTarget as HTMLButtonElement).setPointerCapture(e.pointerId)
-        setElapsed(0)
-        onPressStart()
-      }}
-      onPointerUp={(e) => {
-        e.preventDefault()
-        onPressEnd()
-      }}
-      onPointerCancel={() => {
-        if (listening) onPressEnd()
+        onToggle()
       }}
       onContextMenu={(e) => e.preventDefault()}
     >
@@ -68,11 +62,11 @@ export function MicButton({
         <i />
         <i />
       </span>
-      <span className="mic-button__icon" aria-hidden>
-        {listening ? '●' : '🎙'}
+      <span className={`mic-button__icon${listening ? ' is-live' : ''}`} aria-hidden>
+        {listening ? <span className="mic-button__live-dot" /> : <IconMic />}
       </span>
       <span className="mic-button__label">
-        {listening ? `录音中 ${formatElapsed(displayElapsed)}` : label}
+        {listening ? `录音中 ${formatElapsed(displayElapsed)}` : idleLabel}
       </span>
     </button>
   )

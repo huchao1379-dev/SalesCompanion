@@ -1,8 +1,13 @@
 import { AppShell } from './app/AppShell'
+import { ThemeProvider } from './theme/ThemeContext'
 import './App.css'
 
 function App() {
-  return <AppShell />
+  return (
+    <ThemeProvider>
+      <AppShell />
+    </ThemeProvider>
+  )
 }
 
 export default App

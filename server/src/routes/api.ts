@@ -88,6 +88,32 @@ apiRouter.get('/metrics', (_req, res) => {
   res.json(store.computeMetrics())
 })
 
+apiRouter.get('/opportunities', (_req, res) => {
+  const items = store.opportunities.map((opp) => {
+    const account = store.getAccount(opp.accountId)
+    const contact = store.getContactsForAccount(opp.accountId)[0]
+    return {
+      ...opp,
+      accountExternalKey: account?.externalKey,
+      accountLastVisitAt: account?.lastVisitAt,
+      accountVisitCount30d: account?.visitCount30d,
+      accountNpsDelta: account?.npsDelta,
+      accountNotes: account?.notes,
+      primaryContact: contact
+        ? { name: contact.name, title: contact.title || '' }
+        : null,
+      // Seed CRM records do not carry an official win-rate forecast field.
+      crmWinProbability: null as number | null,
+      ownerName: null as string | null,
+    }
+  })
+  res.json({
+    opportunities: items,
+    dataSource: 'in-memory-seed',
+    note: '管线来自 Dataverse 种子/内存库；无 CRM 赢单预测字段时前端应显示「暂无可靠预测」。',
+  })
+})
+
 apiRouter.get('/accounts', (_req, res) => {
   res.json({ accounts: store.accounts })
 })
@@ -99,12 +125,59 @@ apiRouter.get('/accounts/:id', (req, res) => {
     return
   }
   const profileMsg = buildAccountProfileMessage(account)
+  const orders = store.getOrdersForAccount(account.id)
+  const shipments = orders
+    .map((o) => store.getShipmentForOrder(o.id))
+    .filter(Boolean)
+  const activities = store
+    .listActivityDrafts()
+    .filter(
+      (a) =>
+        a.accountId === account.id ||
+        a.accountRef === account.externalKey ||
+        a.accountName === account.name,
+    )
+  const opportunityDrafts = store
+    .listOpportunityDrafts()
+    .filter(
+      (d) =>
+        d.accountId === account.id ||
+        d.accountRef === account.externalKey ||
+        d.accountName === account.name,
+    )
   res.json({
     account,
     contacts: store.getContactsForAccount(account.id),
-    opportunities: store.getOpportunitiesForAccount(account.id),
-    orders: store.getOrdersForAccount(account.id),
+    opportunities: store.getOpportunitiesForAccount(account.id).map((opp) => ({
+      ...opp,
+      // Seed CRM records do not carry an official win-rate forecast field.
+      crmWinProbability: null as number | null,
+      ownerName: null as string | null,
+      nextAction: null as { label: string; dueAt: string } | null,
+    })),
+    opportunityDrafts,
+    orders,
+    shipments,
+    activities,
     profile: profileMsg,
+    meta: {
+      dataSource: 'in-memory-seed',
+      asOf: new Date().toISOString(),
+      // Fields not yet modeled in seed / Dataverse demo tables
+      missingFields: [
+        'accountType',
+        'accountStatus',
+        'ownerName',
+        'address',
+        'contact.department',
+        'contact.role',
+        'contact.lastContactAt',
+        'crmWinProbability',
+        'equipmentInstalled',
+        'serviceTickets',
+      ],
+      note: '客户画像读路径来自 Dataverse 种子/内存库；缺失字段前端应显示「待补充」，不可编造。',
+    },
   })
 })
 
