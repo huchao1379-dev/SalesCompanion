@@ -193,6 +193,11 @@ p {
   --tab-h: 72px;
 }
 
+/* Activity Details: chip row + Copilot composer (aligned with home dock) */
+.app-shell.has-dock--activity {
+  --tab-h: 118px;
+}
+
 .app-shell__top {
   padding: var(--space-4) var(--space-5) 0;
 }

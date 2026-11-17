@@ -211,4 +211,5 @@ export type Intent =
   | 'capture_visit'
   | 'query_account'
   | 'query_order'
+  | 'work_summary'
   | 'clarify'

@@ -249,6 +249,12 @@
   padding: 0.4rem 0.25rem;
 }
 
+.chat-dock__composer input:focus,
+.chat-dock__composer input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 .chat-dock__composer input::placeholder {
   color: #9aa3af;
 }
@@ -266,6 +272,89 @@
   cursor: pointer;
   background: transparent;
   color: #9aa3af;
+}
+
+.chat-dock__attach:focus,
+.chat-dock__attach:focus-visible,
+.chat-dock__mic:focus,
+.chat-dock__mic:focus-visible,
+.chat-dock__send:focus,
+.chat-dock__send:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.chat-dock__attach.is-active {
+  color: #2563eb;
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.chat-dock__attach:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.chat-dock__files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.45rem;
+}
+
+.chat-dock__file {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  padding: 0.28rem 0.45rem 0.28rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.95);
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.chat-dock__file-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.chat-dock__file-name {
+  min-width: 0;
+  max-width: 9.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-dock__file-remove {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(17, 24, 39, 0.06);
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.chat-dock__file-remove:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
+.chat-dock__file-hint {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  color: var(--muted);
 }
 
 .chat-dock__mic.is-listening {

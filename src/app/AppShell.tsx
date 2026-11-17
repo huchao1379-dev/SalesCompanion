@@ -92,7 +92,9 @@ export function AppShell() {
     <div
       className={`app-shell${onBoard ? ' app-shell--board' : ''}${showDock ? ' has-dock' : ''}${
         showDock && (screen === 'capture' || screen === 'opportunity') ? ' has-dock--compact' : ''
-      }${screen === 'opportunity-detail' ? ' has-opp-detail' : ''}`}
+      }${showDock && screen === 'activity' ? ' has-dock--activity' : ''}${
+        screen === 'opportunity-detail' ? ' has-opp-detail' : ''
+      }`}
     >
       {onBoard ? (
         <HomeDashboard

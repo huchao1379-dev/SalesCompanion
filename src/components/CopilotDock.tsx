@@ -1,4 +1,4 @@
-import type { FormEvent, KeyboardEvent } from 'react'
+import { useRef, type FormEvent, type KeyboardEvent } from 'react'
 import {
   IconBrief,
   IconCheck,
@@ -47,6 +47,8 @@ export function CopilotDock({
     submit()
   }
 
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
   const rootClass = [
     'copilot-dock',
     mode === 'activity' ? 'copilot-dock--activity' : '',
@@ -57,34 +59,64 @@ export function CopilotDock({
 
   return (
     <div className={rootClass} aria-label="快捷栏">
-      {mode === 'activity' ? (
-        <div className="copilot-dock__float-actions">
-          <button type="button" className="activity-action-btn">
-            <IconCheck /> 完成
-          </button>
-          <button type="button" className="activity-action-btn">
-            <IconEdit /> 编辑
-          </button>
-        </div>
-      ) : mode === 'compact' ? null : (
+      {mode === 'compact' ? null : (
         <div className="copilot-dock__actions">
-          <button type="button" className="copilot-chip" onClick={onOpenCapture}>
-            <IconPlus />
-            新建拜访
-          </button>
-          <button type="button" className="copilot-chip" onClick={onOpenOpportunity}>
-            <IconEye />
-            查看商机
-          </button>
-          <button type="button" className="copilot-chip" onClick={onOpenBrief}>
-            <IconBrief />
-            智能简报
-          </button>
+          {mode === 'activity' ? (
+            <>
+              <button type="button" className="copilot-chip">
+                <IconCheck />
+                完成
+              </button>
+              <button type="button" className="copilot-chip">
+                <IconEdit />
+                编辑
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="copilot-chip" onClick={onOpenCapture}>
+                <IconPlus />
+                新建拜访
+              </button>
+              <button type="button" className="copilot-chip" onClick={onOpenOpportunity}>
+                <IconEye />
+                查看商机
+              </button>
+              <button type="button" className="copilot-chip" onClick={onOpenBrief}>
+                <IconBrief />
+                智能简报
+              </button>
+            </>
+          )}
         </div>
       )}
 
+      <input
+        ref={fileInputRef}
+        type="file"
+        hidden
+        accept="image/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.md"
+        multiple
+        onChange={(e) => {
+          const names = Array.from(e.target.files || [])
+            .map((f) => f.name)
+            .slice(0, 5)
+          e.target.value = ''
+          if (names.length) {
+            onOpenChat(`【附件】${names.join('、')}\n请结合附件帮我处理`)
+          } else {
+            onOpenChat(draft)
+          }
+        }}
+      />
+
       <form className="copilot-dock__composer" onSubmit={onSubmit}>
-        <button type="button" className="copilot-dock__attach" aria-label="添加附件">
+        <button
+          type="button"
+          className="copilot-dock__attach"
+          aria-label="添加附件"
+          onClick={() => fileInputRef.current?.click()}
+        >
           <IconPaperclip />
         </button>
         <input

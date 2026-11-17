@@ -1,8 +1,9 @@
+import { chatJson, hasDeepSeek } from '../llm/deepseek.js'
 import type { AgentMessage, SourceRef } from '../types.js'
 import { resolveAccount } from './accountProfile.js'
 import { store } from '../store/dataverseStore.js'
 
-export function queryOrderLogistics(utterance: string): AgentMessage {
+function buildHeuristic(utterance: string): AgentMessage {
   const account = resolveAccount(utterance)
   if (!account) {
     return {
@@ -77,5 +78,49 @@ export function queryOrderLogistics(utterance: string): AgentMessage {
     confidence: 0.88,
     agent_chain: ['Orchestrator', '订单查询 Agent', '物流查询 Agent'],
     createdAt: new Date().toISOString(),
+  }
+}
+
+/** DeepSeek 润色订单/物流回答；无 Key 时启发式。 */
+export async function queryOrderLogistics(
+  utterance: string,
+): Promise<{ message: AgentMessage; mode: 'deepseek' | 'heuristic' }> {
+  const fallback = buildHeuristic(utterance)
+  if (!hasDeepSeek() || fallback.confidence < 0.5 || fallback.sources.length === 0) {
+    return { message: fallback, mode: 'heuristic' }
+  }
+
+  const account = resolveAccount(utterance)
+  if (!account) return { message: fallback, mode: 'heuristic' }
+
+  const orders = store.getOrdersForAccount(account.id)
+  const latest = orders.sort((a, b) => b.orderedAt.localeCompare(a.orderedAt))[0]
+  if (!latest) return { message: fallback, mode: 'heuristic' }
+  const shipment = store.getShipmentForOrder(latest.id)
+
+  try {
+    const { data, mode } = await chatJson<{ answer: string; confidence?: number }>({
+      system: `你是订单/物流查询 Agent。只根据 facts 用中文简洁回答销售问题，禁止编造。只输出 JSON：{"answer":"...","confidence":0-1}`,
+      user: JSON.stringify({
+        question: utterance,
+        facts: {
+          account: account.name,
+          order: latest,
+          shipment: shipment || null,
+        },
+      }),
+      temperature: 0.15,
+    })
+    if (!data.answer?.trim()) return { message: fallback, mode: 'heuristic' }
+    return {
+      mode,
+      message: {
+        ...fallback,
+        content: data.answer.trim(),
+        confidence: Math.max(0, Math.min(1, data.confidence ?? 0.88)),
+      },
+    }
+  } catch {
+    return { message: fallback, mode: 'heuristic' }
   }
 }

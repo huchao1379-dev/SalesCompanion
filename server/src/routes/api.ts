@@ -2,12 +2,14 @@ import { Router } from 'express'
 import { config, hasDeepSeek, hasRemoteDataverse } from '../config.js'
 import { orchestrate } from '../orchestrator.js'
 import { store } from '../store/dataverseStore.js'
-import { buildAccountProfileMessage, resolveAccount } from '../agents/accountProfile.js'
+import { resolveAccount, synthesizeAccountProfile } from '../agents/accountProfile.js'
+import { getCatalogSummary, ensureAgentsRegistered } from '../agents/catalog.js'
 import type { DraftPayload } from '../types.js'
 
 export const apiRouter = Router()
 
 apiRouter.get('/health', (_req, res) => {
+  ensureAgentsRegistered()
   res.json({
     ok: true,
     deepseek: hasDeepSeek(),
@@ -15,7 +17,13 @@ apiRouter.get('/health', (_req, res) => {
     dataverseMode: hasRemoteDataverse() ? 'webapi' : 'in-memory-seed',
     promptVersion: config.promptVersion,
     accounts: store.accounts.length,
+    agents: getCatalogSummary().length,
   })
+})
+
+/** Unified agent management entry — list registered Domain Agents. */
+apiRouter.get('/agents', (_req, res) => {
+  res.json({ agents: getCatalogSummary() })
 })
 
 apiRouter.post('/orchestrate', async (req, res) => {
@@ -118,13 +126,13 @@ apiRouter.get('/accounts', (_req, res) => {
   res.json({ accounts: store.accounts })
 })
 
-apiRouter.get('/accounts/:id', (req, res) => {
+apiRouter.get('/accounts/:id', async (req, res) => {
   const account = store.getAccount(req.params.id) || resolveAccount(req.params.id)
   if (!account) {
     res.status(404).json({ error: 'account not found' })
     return
   }
-  const profileMsg = buildAccountProfileMessage(account)
+  const { message: profileMsg, mode: profileMode } = await synthesizeAccountProfile(account)
   const orders = store.getOrdersForAccount(account.id)
   const shipments = orders
     .map((o) => store.getShipmentForOrder(o.id))
@@ -162,6 +170,7 @@ apiRouter.get('/accounts/:id', (req, res) => {
     profile: profileMsg,
     meta: {
       dataSource: 'in-memory-seed',
+      profileMode,
       asOf: new Date().toISOString(),
       // Fields not yet modeled in seed / Dataverse demo tables
       missingFields: [

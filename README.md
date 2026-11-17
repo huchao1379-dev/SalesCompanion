@@ -7,20 +7,27 @@
 ## 快速启动
 
 ```bash
-# 1) API（DeepSeek 可选；无 Key 时用启发式 + 种子 Dataverse）
+# 首次：在 server/.env 填 DEEPSEEK_API_KEY（可选）
+# cd server && copy .env.example .env
+
+# 一键（推荐）：API + 前端
+npm run dev:all
+```
+
+或分两个终端：
+
+```bash
+# 终端 1 — API（DeepSeek）
 cd server
-cp .env.example .env   # 可选填 DEEPSEEK_API_KEY
-npm install
 npm run dev
 
-# 2) 前端（另开终端）
+# 终端 2 — 前端
 cd ..
-npm install
 npm run dev
 ```
 
-- 前端：http://localhost:5173  
-- API：http://localhost:8787/api/health  
+- 前端：http://127.0.0.1:5174  
+- API：http://127.0.0.1:8787/api/health  
 - Vite 已代理 `/api` → `8787`
 
 ## Demo 能力

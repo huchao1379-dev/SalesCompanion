@@ -1,11 +1,12 @@
 import { chatJson, hasDeepSeek } from '../llm/deepseek.js'
 import type { Intent } from '../types.js'
 
-const SYSTEM = `你是销售 CRM 意图分类器。只输出 JSON：{"intent":"capture_visit|query_account|query_order|clarify","confidence":0-1}
+const SYSTEM = `你是销售 CRM 意图分类器。只输出 JSON：{"intent":"capture_visit|query_account|query_order|work_summary|clarify","confidence":0-1}
 规则：
 - 拜访结果、约见、意向采购、台数 → capture_visit
 - 客户怎么样、画像、进度（非明确订单物流）→ query_account
 - 订单、物流、清关、发货、到港 → query_order
+- 日报、周报、工作总结、今日小结 → work_summary
 - 信息不足无法判断 → clarify`
 
 export async function classifyIntent(utterance: string): Promise<{
@@ -32,6 +33,9 @@ export async function classifyIntent(utterance: string): Promise<{
 function heuristicIntent(utterance: string): { intent: Intent; confidence: number } {
   const t = utterance.trim()
   if (!t || t.length < 2) return { intent: 'clarify', confidence: 0.9 }
+  if (/日报|周报|工作总结|今日小结|帮我总结/.test(t)) {
+    return { intent: 'work_summary', confidence: 0.9 }
+  }
   if (/订单|物流|清关|发货|到港|运单|shipment|order/i.test(t)) {
     return { intent: 'query_order', confidence: 0.86 }
   }

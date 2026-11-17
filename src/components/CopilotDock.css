@@ -21,30 +21,19 @@
 }
 
 .copilot-dock--activity {
-  gap: 0.75rem;
-  padding-top: 0;
-  background: linear-gradient(180deg, transparent 0%, rgba(238, 243, 248, 0.92) 28%, #fff 55%);
-  border-top: none;
-  pointer-events: none;
-}
-
-.copilot-dock--activity .copilot-dock__float-actions,
-.copilot-dock--activity .copilot-dock__composer {
-  pointer-events: auto;
-}
-
-.copilot-dock__float-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.65rem;
-  padding: 0 0.15rem;
-  transform: translateY(0);
+  /* Same compact chip row as home dock (查看商机等) */
+  gap: 0.55rem;
 }
 
 .copilot-dock__actions {
   display: flex;
   gap: 0.45rem;
   justify-content: space-between;
+}
+
+.copilot-dock--activity .copilot-dock__actions {
+  /* Two chips share space like home row, without oversized CTA look */
+  max-width: 100%;
 }
 
 .copilot-chip {
@@ -96,8 +85,22 @@
   padding: 0.35rem 0.2rem;
 }
 
+.copilot-dock__composer input:focus,
+.copilot-dock__composer input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 .copilot-dock__composer input::placeholder {
   color: var(--muted);
+}
+
+.copilot-dock__attach:focus,
+.copilot-dock__attach:focus-visible,
+.copilot-dock__send:focus,
+.copilot-dock__send:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .copilot-dock__attach,
@@ -133,26 +136,6 @@
   background: var(--surface-solid);
   border-color: var(--line-strong);
   color: var(--text-secondary);
-}
-
-.activity-action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
-  border-radius: 999px;
-  border: 1.5px solid #14b8a6;
-  background: #fff;
-  color: #0f766e;
-  font-weight: 700;
-  font-size: 0.9rem;
-  padding: 0.72rem 0.8rem;
-  cursor: pointer;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
-}
-
-.activity-action-btn:hover {
-  background: rgba(20, 184, 166, 0.08);
 }
 
 :root[data-theme='dark'] .copilot-dock {
