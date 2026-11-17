@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "appId": null,
+  "appId": "b2ae20b9-3248-4902-9de8-21d5612e8492",
   "appDisplayName": "SalesCompanion",
   "region": "prod",
   "appType": "CodeApp",
@@ -11,5 +11,8 @@
   "localAppUrl": "http://localhost:3000",
   "logoPath": "Default",
   "connectionReferences": {},
-  "databaseReferences": {}
+  "databaseReferences": {},
+  "appSettings": {
+    "showHeader": false
+  }
 }

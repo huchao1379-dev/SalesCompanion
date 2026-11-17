@@ -6,10 +6,11 @@ type Props = {
 }
 
 export function ProgressRing({ value, size = 72, stroke = 7, className = '' }: Props) {
-  const pct = Math.max(0, Math.min(100, value))
+  const labelPct = Math.max(0, Math.round(value))
+  const ringPct = Math.max(0, Math.min(100, value))
   const r = (size - stroke) / 2
   const c = 2 * Math.PI * r
-  const offset = c - (pct / 100) * c
+  const offset = c - (ringPct / 100) * c
 
   return (
     <svg
@@ -47,7 +48,7 @@ export function ProgressRing({ value, size = 72, stroke = 7, className = '' }: P
         textAnchor="middle"
         className="progress-ring__label"
       >
-        {Math.round(pct)}%
+        {labelPct}%
       </text>
     </svg>
   )

@@ -6,10 +6,15 @@ import { powerApps } from '@microsoft/power-apps-vite/plugin'
 export default defineConfig({
   plugins: [react(), powerApps()],
   server: {
+    host: '127.0.0.1',
+    port: 5174,
+    strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:8787',
+        // Prefer IPv4 — on Windows, `localhost` can resolve to ::1 and ECONNREFUSED.
+        target: 'http://127.0.0.1:8787',
         changeOrigin: true,
+        secure: false,
       },
     },
   },

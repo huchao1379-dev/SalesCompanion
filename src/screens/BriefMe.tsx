@@ -10,6 +10,7 @@ import { IconBulb, IconClose, IconRefresh, IconSpark } from '../components/DashI
 import { buildBriefChapters, type BriefChapter } from '../data/brief'
 import { listDrafts } from '../data/dataverse'
 import { subscribeDrafts } from '../data/draftStore'
+import { cancelSpeech, speakText, unlockSpeech } from '../speech/tts'
 
 type Props = {
   open: boolean
@@ -83,7 +84,7 @@ export function BriefMe({ open, onClose }: Props) {
   useEffect(() => {
     return () => {
       speakGen.current += 1
-      window.speechSynthesis?.cancel()
+      cancelSpeech()
     }
   }, [])
 
@@ -95,48 +96,48 @@ export function BriefMe({ open, onClose }: Props) {
 
   const stopSpeak = useCallback(() => {
     speakGen.current += 1
-    window.speechSynthesis?.cancel()
+    cancelSpeech()
     setPlaying(false)
   }, [])
 
-  const speakPage = useCallback((index: number) => {
+  const speakPage = useCallback((index: number, fromUserGesture = false) => {
     const current = pagesRef.current[index]
     if (!current || !window.speechSynthesis) {
       setPlaying(false)
       return
     }
 
+    if (fromUserGesture) unlockSpeech()
+
     speakGen.current += 1
     const gen = speakGen.current
-    window.speechSynthesis.cancel()
 
     const insight = chapterToInsight(current, index)
     const text = [insight.headline, insight.body].join('。')
-    const utter = new SpeechSynthesisUtterance(text)
-    utter.lang = 'zh-CN'
-    utter.rate = 1
-
-    utter.onend = () => {
-      if (gen !== speakGen.current) return
-      const next = index + 1
-      if (next < pagesRef.current.length) {
-        pageRef.current = next
-        setPage(next)
-        setElapsed(0)
-        speakPage(next)
-      } else {
-        setPlaying(false)
-      }
-    }
-
-    utter.onerror = () => {
-      if (gen !== speakGen.current) return
-      setPlaying(false)
-    }
 
     setElapsed(0)
     setPlaying(true)
-    window.speechSynthesis.speak(utter)
+
+    void speakText(text, {
+      lang: 'zh-CN',
+      rate: 1,
+      onEnd: () => {
+        if (gen !== speakGen.current) return
+        const next = index + 1
+        if (next < pagesRef.current.length) {
+          pageRef.current = next
+          setPage(next)
+          setElapsed(0)
+          speakPage(next, false)
+        } else {
+          setPlaying(false)
+        }
+      },
+      onError: () => {
+        if (gen !== speakGen.current) return
+        setPlaying(false)
+      },
+    })
   }, [])
 
   const goToPage = useCallback(
@@ -146,7 +147,7 @@ export function BriefMe({ open, onClose }: Props) {
       setPage(next)
       setDragX(0)
       setElapsed(0)
-      if (autoPlay) speakPage(next)
+      if (autoPlay) speakPage(next, true)
       else stopSpeak()
     },
     [speakPage, stopSpeak],
@@ -161,12 +162,15 @@ export function BriefMe({ open, onClose }: Props) {
     pageRef.current = 0
     setPage(0)
     setElapsed(0)
-    speakPage(0)
+    // Autoplay often blocked on Android Chrome without a fresh gesture;
+    // still attempt (works on iOS). Manual play button remains the fallback.
+    speakPage(0, false)
   }, [open, speakPage, stopSpeak])
 
   function refresh() {
+    unlockSpeech()
     setChapters(buildBriefChapters(listDrafts()))
-    speakPage(pageRef.current)
+    speakPage(pageRef.current, true)
   }
 
   function onPointerDown(e: ReactPointerEvent<HTMLElement>) {
@@ -284,7 +288,7 @@ export function BriefMe({ open, onClose }: Props) {
               aria-label={playing ? '停止播报' : '播放今日播报'}
               onClick={() => {
                 if (playing) stopSpeak()
-                else speakPage(pageRef.current)
+                else speakPage(pageRef.current, true)
               }}
             >
               <span className="sheet-icon-btn__stop" />

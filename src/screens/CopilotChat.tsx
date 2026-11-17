@@ -1,9 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AgentMessage, DraftPayload } from '../agents/types'
 import { getOrchestratorMode, orchestrate } from '../agents/orchestratorClient'
 import { AgentLabel } from '../components/AgentLabel'
 import { DraftCard } from '../components/DraftCard'
-import { MicButton } from '../components/MicButton'
+import {
+  IconBack,
+  IconMic,
+  IconPaperclip,
+  IconSendUp,
+} from '../components/DashIcons'
 import { SourceChips } from '../components/SourceChips'
 import {
   appendMessages,
@@ -14,26 +19,55 @@ import { confirmAndSync, discardDraft, upsertDraft } from '../data/dataverse'
 import { useWebSpeech } from '../speech/useWebSpeech'
 
 type Props = {
+  initialPrompt?: string
+  onBack?: () => void
   onOpenAccount?: (accountKey: string) => void
   onOpenOpportunity?: () => void
+  onOpenTasks?: () => void
 }
 
-const SUGGESTIONS = [
-  '仁济医院最近怎么样？',
-  'Hospital Alpha 最新进度？',
-  '查一下仁济医院上个订单的物流',
-  '查一下 Hospital Alpha 上个订单的物流',
-  '刚拜访完上海仁济医院张主任，他对监护仪 N17 感兴趣，要 12 台，下周三再约一次定标书细节。',
+const HELP_ITEMS = [
+  'Query customer info and opportunity status.',
+  "Get today's schedule and to-do items.",
+  'Analyze sales trends and performance data.',
 ]
 
-export function CopilotChat({ onOpenAccount, onOpenOpportunity }: Props) {
+const QUICK_CHIPS = [
+  { label: "Today's tasks", prompt: "What's on my agenda today?" },
+  { label: 'Pipeline status', prompt: 'Summarize my current pipeline status.' },
+  { label: 'Follow-ups', prompt: 'What follow-ups should I do next?' },
+]
+
+export function CopilotChat({
+  initialPrompt = '',
+  onBack,
+  onOpenAccount,
+  onOpenOpportunity,
+  onOpenTasks,
+}: Props) {
   const speech = useWebSpeech()
-  const [input, setInput] = useState('')
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const [input, setInput] = useState(initialPrompt)
   const [conversation, setConversation] = useState(() => loadConversation())
   const [busy, setBusy] = useState(false)
   const [drafts, setDrafts] = useState<DraftPayload[]>([])
   const [status, setStatus] = useState<string | null>(null)
   const messages = conversation.messages
+  const isEmpty = messages.length === 0
+
+  useEffect(() => {
+    if (initialPrompt) setInput(initialPrompt)
+  }, [initialPrompt])
+
+  useEffect(() => {
+    // Avoid auto-focus on iOS: Safari zooms/pans the page and creates scrollbars.
+    const isIOS =
+      /iP(hone|od|ad)/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+    if (isIOS) return
+    const t = window.setTimeout(() => inputRef.current?.focus(), 60)
+    return () => window.clearTimeout(t)
+  }, [])
 
   async function send(text: string) {
     const utterance = text.trim()
@@ -83,6 +117,7 @@ export function CopilotChat({ onOpenAccount, onOpenOpportunity }: Props) {
       setStatus('编排失败')
     } finally {
       setBusy(false)
+      inputRef.current?.focus()
     }
   }
 
@@ -113,139 +148,201 @@ export function CopilotChat({ onOpenAccount, onOpenOpportunity }: Props) {
     }
   }
 
+  function onChip(chip: (typeof QUICK_CHIPS)[number]) {
+    if (chip.label === "Today's tasks" && onOpenTasks) {
+      onOpenTasks()
+      return
+    }
+    if (chip.label === 'Pipeline status' && onOpenOpportunity) {
+      onOpenOpportunity()
+      return
+    }
+    void send(chip.prompt)
+  }
+
   const accountKey = conversation.context.accountRef || conversation.context.accountId
+  const canSend = Boolean(input.trim()) && !busy
 
   return (
-    <section className="screen chat">
-      <header>
-        <p className="home__eyebrow">对话</p>
-        <h1>Copilot Chat</h1>
-        <p className="muted">场景 B 客户速览 · 场景 C 订单物流 · 场景 A 拜访录入。</p>
-      </header>
-
-      <div className="chat__suggestions">
-        {SUGGESTIONS.map((s) => (
-          <button
-            key={s}
-            type="button"
-            className="chip-btn"
-            disabled={busy}
-            onClick={() => void send(s)}
-          >
-            {s}
+    <section className={`chat-screen${isEmpty ? ' is-empty' : ''}`}>
+      <header className="chat-screen__top">
+        {onBack ? (
+          <button type="button" className="chat-screen__back" aria-label="返回" onClick={onBack}>
+            <IconBack />
           </button>
-        ))}
-      </div>
-
-      <div className="chat__thread">
-        {messages.length === 0 ? (
-          <p className="muted">试着问客户进度、订单物流，或口述拜访结果。</p>
         ) : (
-          messages.map((m) => (
-            <article
-              key={m.id}
-              className={`chat-bubble chat-bubble--${m.role === 'user' ? 'user' : 'assistant'}`}
-            >
-              {m.role !== 'user' ? (
-                <AgentLabel name={m.agent_name} chain={m.agent_chain} />
-              ) : null}
-              <p>{m.content}</p>
-              {m.role !== 'user' ? (
-                <div className="chat-bubble__meta">
-                  <span className="confidence">置信度 {(m.confidence * 100).toFixed(0)}%</span>
-                  <SourceChips sources={m.sources} />
-                  {accountKey && onOpenAccount ? (
-                    <button
-                      type="button"
-                      className="linkish"
-                      onClick={() => onOpenAccount(accountKey)}
-                    >
-                      查看客户画像 →
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-            </article>
-          ))
+          <span className="chat-screen__back-spacer" />
         )}
-      </div>
-
-      {status ? <p className="capture__status">{status}</p> : null}
-
-      {drafts.length > 0 ? (
-        <div className="draft-list">
-          <div className="capture__carousel-nav">
-            <strong>本轮草稿</strong>
-            {drafts.some((d) => d.kind === 'opportunity') && onOpenOpportunity ? (
-              <button type="button" className="linkish" onClick={onOpenOpportunity}>
-                打开商机屏 →
-              </button>
-            ) : null}
-          </div>
-          {drafts.map((d) => (
-            <DraftCard
-              key={d.idempotencyKey}
-              draft={d}
-              busy={busy}
-              onChange={updateDraft}
-              onConfirm={(draft) => {
-                void handleConfirm(draft)
-              }}
-              onDiscard={(draft) => {
-                void handleDiscard(draft)
-              }}
-              onRetry={(draft) => {
-                void handleConfirm({ ...draft, syncStatus: 'Draft' })
-              }}
-            />
-          ))}
-        </div>
-      ) : null}
-
-      <div className="chat__composer">
-        <input
-          value={input}
-          placeholder="输入问题…"
-          disabled={busy}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') void send(input)
-          }}
-        />
+        <h1>Copilot</h1>
         <button
           type="button"
-          className="btn btn--primary"
-          disabled={busy}
-          onClick={() => void send(input)}
-        >
-          发送
-        </button>
-      </div>
-
-      <div className="capture__toolbar">
-        <button
-          type="button"
-          className="btn btn--ghost"
+          className="chat-screen__clear"
           onClick={() => {
             setConversation(clearConversation())
             setDrafts([])
             setStatus(null)
           }}
         >
-          清空会话
+          Clear
         </button>
+      </header>
+
+      <div className="chat-screen__body">
+        {isEmpty ? (
+          <div className="chat-empty">
+            <div className="chat-empty__help">
+              <h2>I can help you with:</h2>
+              <ol>
+                {HELP_ITEMS.map((item, index) => (
+                  <li key={item}>
+                    <span className="chat-empty__num" aria-hidden>
+                      {index + 1}
+                    </span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+            <p className="chat-empty__hint">Type a question or hold the mic to start.</p>
+          </div>
+        ) : (
+          <div className="chat__thread">
+            {messages.map((m) => (
+              <article
+                key={m.id}
+                className={`chat-bubble chat-bubble--${m.role === 'user' ? 'user' : 'assistant'}`}
+              >
+                {m.role !== 'user' ? (
+                  <AgentLabel name={m.agent_name} chain={m.agent_chain} />
+                ) : null}
+                <p>{m.content}</p>
+                {m.role !== 'user' ? (
+                  <div className="chat-bubble__meta">
+                    <span className="confidence">置信度 {(m.confidence * 100).toFixed(0)}%</span>
+                    <SourceChips sources={m.sources} />
+                    {accountKey && onOpenAccount ? (
+                      <button
+                        type="button"
+                        className="linkish"
+                        onClick={() => onOpenAccount(accountKey)}
+                      >
+                        查看客户画像 →
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        )}
+
+        {status ? <p className="capture__status">{status}</p> : null}
+
+        {drafts.length > 0 ? (
+          <div className="draft-list">
+            <div className="capture__carousel-nav">
+              <strong>本轮草稿</strong>
+              {drafts.some((d) => d.kind === 'opportunity') && onOpenOpportunity ? (
+                <button type="button" className="linkish" onClick={onOpenOpportunity}>
+                  打开商机屏 →
+                </button>
+              ) : null}
+            </div>
+            {drafts.map((d) => (
+              <DraftCard
+                key={d.idempotencyKey}
+                draft={d}
+                busy={busy}
+                onChange={updateDraft}
+                onConfirm={(draft) => {
+                  void handleConfirm(draft)
+                }}
+                onDiscard={(draft) => {
+                  void handleDiscard(draft)
+                }}
+                onRetry={(draft) => {
+                  void handleConfirm({ ...draft, syncStatus: 'Draft' })
+                }}
+              />
+            ))}
+          </div>
+        ) : null}
       </div>
 
-      <div className="capture__mic">
-        <MicButton
-          listening={speech.listening}
-          disabled={busy}
-          onPressStart={() => speech.start('zh-CN')}
-          onPressEnd={() => {
-            const text = speech.stop()
-            if (text) void send(text)
+      <div className="chat-dock">
+        {isEmpty ? (
+          <div className="chat-dock__chips">
+            {QUICK_CHIPS.map((chip) => (
+              <button
+                key={chip.label}
+                type="button"
+                className="chat-dock__chip"
+                disabled={busy}
+                onClick={() => onChip(chip)}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        <form
+          className="chat-dock__composer"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void send(input)
           }}
-        />
+        >
+          <button type="button" className="chat-dock__attach" aria-label="添加附件">
+            <IconPaperclip />
+          </button>
+          <input
+            ref={inputRef}
+            value={input}
+            placeholder="Ask Copilot..."
+            disabled={busy}
+            inputMode="text"
+            enterKeyHint="send"
+            autoComplete="off"
+            autoCorrect="on"
+            autoCapitalize="sentences"
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                void send(input)
+              }
+            }}
+            aria-label="Ask Copilot"
+          />
+          <button
+            type="button"
+            className={`chat-dock__mic${speech.listening ? ' is-listening' : ''}`}
+            aria-label={speech.listening ? '松开结束语音' : '按住说话'}
+            disabled={busy}
+            onPointerDown={(e) => {
+              e.preventDefault()
+              speech.start('zh-CN')
+            }}
+            onPointerUp={() => {
+              const text = speech.stop()
+              if (text) void send(text)
+            }}
+            onPointerCancel={() => {
+              speech.stop()
+            }}
+          >
+            <IconMic />
+          </button>
+          <button
+            type="submit"
+            className={`chat-dock__send${canSend ? ' is-ready' : ''}`}
+            aria-label="发送"
+            disabled={!canSend}
+          >
+            <IconSendUp />
+          </button>
+        </form>
       </div>
     </section>
   )
