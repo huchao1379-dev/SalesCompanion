@@ -9,7 +9,7 @@ import type {
   PipelineDef,
   PipelineState,
 } from './agents/agentTypes.js'
-import { store } from './store/dataverseStore.js'
+import { repository } from './store/dataverseStore.js'
 import type {
   AgentMessage,
   DraftPayload,
@@ -222,7 +222,7 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
   const latencyMs = Math.round(performance.now() - t0)
   const mode = ctx.modes.has('deepseek') ? 'deepseek' : 'heuristic'
 
-  store.writeLog({
+  await repository.writeLog({
     sessionId: sessionKey,
     agentName: 'Orchestrator',
     inputSummary: utterance.slice(0, 500),
@@ -240,9 +240,9 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
   })
 
   if (sessionKey) {
-    const prev = store.getConversation(sessionKey)
+    const prev = await repository.getConversation(sessionKey)
     const prevMessages = prev ? (JSON.parse(prev.messagesJson) as unknown[]) : []
-    store.saveConversation(sessionKey, ctx.memory, [
+    await repository.saveConversation(sessionKey, ctx.memory, [
       ...prevMessages,
       { role: 'user', content: utterance },
       ...messages,

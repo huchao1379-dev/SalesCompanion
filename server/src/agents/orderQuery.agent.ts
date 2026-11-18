@@ -1,6 +1,7 @@
 import type { DomainAgent } from './agentTypes.js'
 import { queryOrderLogistics } from './orderQuery.js'
 import { resolveAccount } from './accountProfile.js'
+import * as tools from '../tools/dataverseTools.js'
 
 export const orderQueryAgent: DomainAgent = {
   name: 'OrderQuery',
@@ -8,10 +9,14 @@ export const orderQueryAgent: DomainAgent = {
   description: '查询客户最近订单与物流 ETA（Dataverse 临时订单表）',
   intents: ['query_order'],
   async run(ctx) {
-    const { message: orderMsg, mode } = await queryOrderLogistics(ctx.utterance)
-    const account = resolveAccount(ctx.utterance) ||
+    const { message: orderMsg, mode } = await queryOrderLogistics(
+      ctx.utterance,
+      ctx.memory.accountId,
+      ctx.memory.accountName,
+    )
+    const account = await resolveAccount(ctx.utterance) ||
       (ctx.memory.accountId
-        ? resolveAccount(ctx.memory.accountId)
+        ? await tools.getAccount(ctx.memory.accountId)
         : undefined)
 
     return {

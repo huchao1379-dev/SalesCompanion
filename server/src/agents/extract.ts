@@ -1,4 +1,5 @@
-import { chatJson, hasDeepSeek } from '../llm/deepseek.js'
+import { chatStructured, hasDeepSeek } from '../llm/deepseek.js'
+import { extractVisitOutputSchema } from '../llm/schemas.js'
 import type { ExtractedVisit } from '../types.js'
 import { EXTRACT_SYSTEM } from './prompts.js'
 
@@ -8,14 +9,20 @@ export async function extractVisit(utterance: string): Promise<{
 }> {
   if (hasDeepSeek()) {
     try {
-      const { data, mode } = await chatJson<ExtractedVisit>({
+      const { data, mode } = await chatStructured({
         system: EXTRACT_SYSTEM,
         user: JSON.stringify({ utterance }),
         temperature: 0.1,
+        schema: extractVisitOutputSchema,
       })
       return {
         extracted: {
-          ...data,
+          accountName: data.accountName ?? undefined,
+          contactName: data.contactName ?? undefined,
+          productLine: data.productLine ?? undefined,
+          productModel: data.productModel ?? undefined,
+          quantity: data.quantity ?? undefined,
+          followUpHint: data.followUpHint ?? undefined,
           confidence: clamp(data.confidence ?? 0.75),
           visitType: data.visitType || 'Visit',
           summary: data.summary || utterance.slice(0, 120),

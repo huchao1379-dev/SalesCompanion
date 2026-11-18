@@ -31,7 +31,7 @@ export const activityCreateAgent: DomainAgent = {
       contact: ctx.state.contact,
       sessionKey: ctx.sessionKey,
     })
-    tools.upsertActivityDraft(activity)
+    await tools.upsertActivityDraft(activity)
 
     return {
       drafts: [activity],

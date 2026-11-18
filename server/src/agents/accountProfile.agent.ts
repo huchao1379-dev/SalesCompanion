@@ -1,6 +1,12 @@
 import type { DomainAgent } from './agentTypes.js'
-import { resolveAccount, synthesizeAccountProfile } from './accountProfile.js'
+import {
+  queryAccountProfileWithTools,
+  resolveAccount,
+  synthesizeAccountProfile,
+} from './accountProfile.js'
+import { hasDeepSeek } from '../llm/deepseek.js'
 import * as tools from '../tools/dataverseTools.js'
+import type { AgentMessage } from '../types.js'
 
 /**
  * - query_account: emit profile Envelope
@@ -13,11 +19,25 @@ export const accountProfileAgent: DomainAgent = {
   intents: ['query_account'],
   async run(ctx) {
     const fromExtract = ctx.state.extracted?.accountName
-    const account =
-      (fromExtract && resolveAccount(fromExtract)) ||
-      resolveAccount(ctx.utterance) ||
-      (ctx.memory.accountId ? tools.getAccount(ctx.memory.accountId) : undefined) ||
-      (ctx.memory.accountName ? tools.getAccount(ctx.memory.accountName) : undefined)
+    let account = fromExtract ? await resolveAccount(fromExtract) : undefined
+    let toolMessage: AgentMessage | undefined
+    let mode: 'deepseek' | 'heuristic' | undefined
+
+    if (!ctx.state.extracted && hasDeepSeek()) {
+      try {
+        const result = await queryAccountProfileWithTools(ctx.utterance, ctx.memory.accountId)
+        account = result.account
+        toolMessage = result.message
+        mode = result.mode
+      } catch {
+        // Fall back to the deterministic repository path if tool selection or output fails.
+      }
+    }
+
+    account = account ||
+      await resolveAccount(ctx.utterance) ||
+      (ctx.memory.accountId ? await tools.getAccount(ctx.memory.accountId) : undefined) ||
+      (ctx.memory.accountName ? await tools.getAccount(ctx.memory.accountName) : undefined)
 
     if (!account) {
       if (ctx.state.extracted) {
@@ -44,12 +64,13 @@ export const accountProfileAgent: DomainAgent = {
       }
     }
 
-    const contact = tools.getContactsForAccount(account.id).find((c) =>
+    const contacts = await tools.getContactsForAccount(account.id)
+    const contact = contacts.find((c) =>
       ctx.state.extracted?.contactName
         ? c.name.includes(ctx.state.extracted.contactName) ||
           ctx.state.extracted.contactName.includes(c.name)
         : true,
-    ) || tools.getContactsForAccount(account.id)[0]
+    ) || contacts[0]
 
     const productHint = [
       ctx.state.extracted?.productModel,
@@ -57,7 +78,7 @@ export const accountProfileAgent: DomainAgent = {
     ]
       .filter(Boolean)
       .join(' ')
-    const existingOpportunity = tools.findMatchingOpportunity(
+    const existingOpportunity = await tools.findMatchingOpportunity(
       account.id,
       productHint || ctx.state.extracted?.productModel,
     )
@@ -78,12 +99,14 @@ export const accountProfileAgent: DomainAgent = {
       return { statePatch, memoryPatch }
     }
 
-    const { message: profile, mode } = await synthesizeAccountProfile(account, ctx.utterance)
+    const { message: profile, mode: profileMode } = toolMessage
+      ? { message: toolMessage, mode }
+      : await synthesizeAccountProfile(account, ctx.utterance)
     return {
       messages: [profile],
       statePatch,
       memoryPatch,
-      mode,
+      mode: profileMode,
     }
   },
 }

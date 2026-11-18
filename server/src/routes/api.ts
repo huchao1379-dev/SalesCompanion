@@ -1,25 +1,25 @@
 import { Router } from 'express'
-import { config, hasCopilotStudioConfig, hasDeepSeek, hasRemoteDataverse } from '../config.js'
+import { config, hasCopilotStudioConfig, hasDeepSeek } from '../config.js'
 import { CopilotStudioConfigurationError, copilotStudioOrchestrate } from '../copilotStudio.js'
 import { orchestrate } from '../orchestrator.js'
-import { store } from '../store/dataverseStore.js'
+import { repository } from '../store/dataverseStore.js'
 import { resolveAccount, synthesizeAccountProfile } from '../agents/accountProfile.js'
 import { getCatalogSummary, ensureAgentsRegistered } from '../agents/catalog.js'
 import type { DraftPayload } from '../types.js'
 
 export const apiRouter = Router()
 
-apiRouter.get('/health', (_req, res) => {
+apiRouter.get('/health', async (_req, res) => {
   ensureAgentsRegistered()
   res.json({
     ok: true,
     aiProvider: config.aiProvider,
     deepseek: hasDeepSeek(),
     copilotstudio: hasCopilotStudioConfig(),
-    dataverseRemote: hasRemoteDataverse(),
-    dataverseMode: hasRemoteDataverse() ? 'webapi' : 'in-memory-seed',
+    dataverseRemote: repository.mode === 'dataverse-webapi',
+    dataverseMode: repository.mode,
     promptVersion: config.promptVersion,
-    accounts: store.accounts.length,
+    accounts: (await repository.listAccounts()).length,
     agents: getCatalogSummary().length,
   })
 })
@@ -46,7 +46,7 @@ async function handleOrchestrate(req: import('express').Request, res: import('ex
       : await orchestrate(payload)
     res.json(result)
   } catch (err) {
-    store.writeLog({
+    await repository.writeLog({
       agentName: 'Orchestrator',
       inputSummary: String(req.body?.utterance || ''),
       latencyMs: 0,
@@ -62,11 +62,11 @@ apiRouter.post('/orchestrate', (req, res) => handleOrchestrate(req, res))
 /** Explicit Copilot Studio SDK endpoint. DeepSeek remains available through /orchestrate when enabled. */
 apiRouter.post('/copilot/message', (req, res) => handleOrchestrate(req, res, true))
 
-apiRouter.get('/drafts', (_req, res) => {
-  res.json({ drafts: store.listAllDrafts() })
+apiRouter.get('/drafts', async (_req, res) => {
+  res.json({ drafts: await repository.listAllDrafts() })
 })
 
-apiRouter.put('/drafts/:key', (req, res) => {
+apiRouter.put('/drafts/:key', async (req, res) => {
   const key = req.params.key
   const body = req.body as DraftPayload
   if (!body || body.idempotencyKey !== key) {
@@ -74,16 +74,16 @@ apiRouter.put('/drafts/:key', (req, res) => {
     return
   }
   if (body.kind === 'activity') {
-    res.json(store.upsertActivity(body))
+    res.json(await repository.upsertActivity(body))
     return
   }
-  res.json(store.upsertOpportunityDraft(body))
+  res.json(await repository.upsertOpportunityDraft(body))
 })
 
 apiRouter.post('/drafts/:key/confirm', async (req, res) => {
   try {
     const fail = Boolean(req.body?.fail)
-    const draft = await store.confirmAndSync(req.params.key, { fail })
+    const draft = await repository.confirmAndSync(req.params.key, { fail })
     if (!draft) {
       res.status(404).json({ error: 'not found' })
       return
@@ -94,8 +94,8 @@ apiRouter.post('/drafts/:key/confirm', async (req, res) => {
   }
 })
 
-apiRouter.post('/drafts/:key/discard', (req, res) => {
-  const draft = store.discardDraft(req.params.key)
+apiRouter.post('/drafts/:key/discard', async (req, res) => {
+  const draft = await repository.discardDraft(req.params.key)
   if (!draft) {
     res.status(404).json({ error: 'not found' })
     return
@@ -103,14 +103,18 @@ apiRouter.post('/drafts/:key/discard', (req, res) => {
   res.json(draft)
 })
 
-apiRouter.get('/metrics', (_req, res) => {
-  res.json(store.computeMetrics())
+apiRouter.get('/metrics', async (_req, res) => {
+  res.json(await repository.computeMetrics())
 })
 
-apiRouter.get('/opportunities', (_req, res) => {
-  const items = store.opportunities.map((opp) => {
-    const account = store.getAccount(opp.accountId)
-    const contact = store.getContactsForAccount(opp.accountId)[0]
+apiRouter.get('/opportunities', async (_req, res) => {
+  const opportunities = await repository.listOpportunities()
+  const items = await Promise.all(opportunities.map(async (opp) => {
+    const [account, contacts] = await Promise.all([
+      repository.getAccount(opp.accountId),
+      repository.getContactsForAccount(opp.accountId),
+    ])
+    const contact = contacts[0]
     return {
       ...opp,
       accountExternalKey: account?.externalKey,
@@ -125,40 +129,41 @@ apiRouter.get('/opportunities', (_req, res) => {
       crmWinProbability: null as number | null,
       ownerName: null as string | null,
     }
-  })
+  }))
   res.json({
     opportunities: items,
-    dataSource: 'in-memory-seed',
+    dataSource: repository.mode,
     note: '管线来自 Dataverse 种子/内存库；无 CRM 赢单预测字段时前端应显示「暂无可靠预测」。',
   })
 })
 
-apiRouter.get('/accounts', (_req, res) => {
-  res.json({ accounts: store.accounts })
+apiRouter.get('/accounts', async (_req, res) => {
+  res.json({ accounts: await repository.listAccounts() })
 })
 
 apiRouter.get('/accounts/:id', async (req, res) => {
-  const account = store.getAccount(req.params.id) || resolveAccount(req.params.id)
+  const account = await repository.getAccount(req.params.id) || await resolveAccount(req.params.id)
   if (!account) {
     res.status(404).json({ error: 'account not found' })
     return
   }
   const { message: profileMsg, mode: profileMode } = await synthesizeAccountProfile(account)
-  const orders = store.getOrdersForAccount(account.id)
-  const shipments = orders
-    .map((o) => store.getShipmentForOrder(o.id))
-    .filter(Boolean)
-  const activities = store
-    .listActivityDrafts()
-    .filter(
+  const [orders, activitiesAll, opportunityDraftsAll, contacts, opportunities] = await Promise.all([
+    repository.getOrdersForAccount(account.id),
+    repository.listActivityDrafts(),
+    repository.listOpportunityDrafts(),
+    repository.getContactsForAccount(account.id),
+    repository.getOpportunitiesForAccount(account.id),
+  ])
+  const shipments = (await Promise.all(orders.map((o) => repository.getShipmentForOrder(o.id))))
+    .filter((shipment) => shipment !== undefined)
+  const activities = activitiesAll.filter(
       (a) =>
         a.accountId === account.id ||
         a.accountRef === account.externalKey ||
         a.accountName === account.name,
     )
-  const opportunityDrafts = store
-    .listOpportunityDrafts()
-    .filter(
+  const opportunityDrafts = opportunityDraftsAll.filter(
       (d) =>
         d.accountId === account.id ||
         d.accountRef === account.externalKey ||
@@ -166,8 +171,8 @@ apiRouter.get('/accounts/:id', async (req, res) => {
     )
   res.json({
     account,
-    contacts: store.getContactsForAccount(account.id),
-    opportunities: store.getOpportunitiesForAccount(account.id).map((opp) => ({
+    contacts,
+    opportunities: opportunities.map((opp) => ({
       ...opp,
       // Seed CRM records do not carry an official win-rate forecast field.
       crmWinProbability: null as number | null,
@@ -180,7 +185,7 @@ apiRouter.get('/accounts/:id', async (req, res) => {
     activities,
     profile: profileMsg,
     meta: {
-      dataSource: 'in-memory-seed',
+      dataSource: repository.mode,
       profileMode,
       asOf: new Date().toISOString(),
       // Fields not yet modeled in seed / Dataverse demo tables
@@ -201,26 +206,26 @@ apiRouter.get('/accounts/:id', async (req, res) => {
   })
 })
 
-apiRouter.get('/orders', (req, res) => {
+apiRouter.get('/orders', async (req, res) => {
   const q = String(req.query.account || '')
-  const account = q ? resolveAccount(q) || store.getAccount(q) : undefined
+  const account = q ? await resolveAccount(q) || await repository.getAccount(q) : undefined
   if (!account) {
-    res.json({ orders: store.orders, shipments: store.shipments })
+    const [orders, shipments] = await Promise.all([repository.listOrders(), repository.listShipments()])
+    res.json({ orders, shipments })
     return
   }
-  const orders = store.getOrdersForAccount(account.id)
-  const shipments = orders
-    .map((o) => store.getShipmentForOrder(o.id))
-    .filter(Boolean)
+  const orders = await repository.getOrdersForAccount(account.id)
+  const shipments = (await Promise.all(orders.map((o) => repository.getShipmentForOrder(o.id))))
+    .filter((shipment) => shipment !== undefined)
   res.json({ account, orders, shipments })
 })
 
-apiRouter.get('/logs', (_req, res) => {
-  res.json({ logs: store.logs.slice(0, 50) })
+apiRouter.get('/logs', async (_req, res) => {
+  res.json({ logs: await repository.listLogs(50) })
 })
 
-apiRouter.get('/conversations/:sessionKey', (req, res) => {
-  const conv = store.getConversation(req.params.sessionKey)
+apiRouter.get('/conversations/:sessionKey', async (req, res) => {
+  const conv = await repository.getConversation(req.params.sessionKey)
   if (!conv) {
     res.status(404).json({ error: 'not found' })
     return
@@ -232,7 +237,6 @@ apiRouter.get('/conversations/:sessionKey', (req, res) => {
   })
 })
 
-apiRouter.post('/seed/reload', (_req, res) => {
-  store.loadSeed()
-  res.json({ ok: true, accounts: store.accounts.length })
+apiRouter.post('/seed/reload', async (_req, res) => {
+  res.json({ ok: true, accounts: await repository.reloadSeed() })
 })

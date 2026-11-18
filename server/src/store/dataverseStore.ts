@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { config } from '../config.js'
+import type { SalesRepository } from './repository.js'
 import type {
   AccountRecord,
   ActivityDraft,
@@ -31,10 +32,10 @@ function now() {
 }
 
 /**
- * In-memory Dataverse stand-in (普通表 VT 替身).
- * When DATAVERSE_URL is set, the same method names can later call Web API.
+ * Seed-backed in-memory implementation of the persistence boundary.
  */
-export class DataverseStore {
+export class SeedMemoryRepository implements SalesRepository {
+  readonly mode = 'seed-memory' as const
   accounts: AccountRecord[] = []
   contacts: ContactRecord[] = []
   opportunities: OpportunityRecord[] = []
@@ -44,6 +45,10 @@ export class DataverseStore {
   opportunityDrafts: OpportunityDraft[] = []
   logs: InvocationLog[] = []
   conversations = new Map<string, ConversationRecord>()
+
+  constructor() {
+    this.loadSeed()
+  }
 
   loadSeed(seedPath = config.seedPath) {
     const raw = readFileSync(seedPath, 'utf-8')
@@ -59,36 +64,61 @@ export class DataverseStore {
     this.conversations.clear()
   }
 
-  searchAccounts(query: string): AccountRecord[] {
+  async reloadSeed(): Promise<number> {
+    this.loadSeed()
+    return this.accounts.length
+  }
+
+  async listAccounts(): Promise<AccountRecord[]> {
+    return [...this.accounts]
+  }
+
+  async listOpportunities(): Promise<OpportunityRecord[]> {
+    return [...this.opportunities]
+  }
+
+  async listOrders(): Promise<OrderRecord[]> {
+    return [...this.orders]
+  }
+
+  async listShipments(): Promise<ShipmentRecord[]> {
+    return [...this.shipments]
+  }
+
+  async searchAccounts(query: string): Promise<AccountRecord[]> {
     const q = query.trim().toLowerCase()
     if (!q) return [...this.accounts]
     return this.accounts.filter(
-      (a) =>
-        a.name.toLowerCase().includes(q) ||
-        a.externalKey.toLowerCase().includes(q) ||
-        q.includes(a.name.toLowerCase()) ||
-        (q.includes('仁济') && a.externalKey.includes('RENJI')) ||
-        (q.includes('alpha') && a.externalKey.includes('ALPHA')),
+      (a) => {
+        const alias = a.externalKey.split(/[-_]/).at(-1)?.toLowerCase()
+        return a.name.toLowerCase().includes(q) ||
+          a.externalKey.toLowerCase().includes(q) ||
+          q.includes(a.name.toLowerCase()) ||
+          Boolean(alias && q.includes(alias))
+      },
     )
   }
 
-  getAccount(idOrKey: string): AccountRecord | undefined {
+  async getAccount(idOrKey: string): Promise<AccountRecord | undefined> {
     return this.accounts.find(
       (a) => a.id === idOrKey || a.externalKey === idOrKey || a.name === idOrKey,
     )
   }
 
-  getContactsForAccount(accountId: string): ContactRecord[] {
+  async getContactsForAccount(accountId: string): Promise<ContactRecord[]> {
     return this.contacts.filter((c) => c.accountId === accountId)
   }
 
-  getOpportunitiesForAccount(accountId: string): OpportunityRecord[] {
+  async getOpportunitiesForAccount(accountId: string): Promise<OpportunityRecord[]> {
     return this.opportunities.filter((o) => o.accountId === accountId)
   }
 
-  findMatchingOpportunity(accountId: string, productHint?: string): OpportunityRecord | undefined {
+  async findMatchingOpportunity(
+    accountId: string,
+    productHint?: string,
+  ): Promise<OpportunityRecord | undefined> {
     const hint = (productHint || '').toLowerCase()
-    const list = this.getOpportunitiesForAccount(accountId)
+    const list = this.opportunities.filter((o) => o.accountId === accountId)
     if (!hint) return list[0]
     return (
       list.find(
@@ -101,27 +131,30 @@ export class DataverseStore {
     )
   }
 
-  getOrdersForAccount(accountId: string): OrderRecord[] {
+  async getOrdersForAccount(accountId: string): Promise<OrderRecord[]> {
     return this.orders.filter((o) => o.accountId === accountId)
   }
 
-  getShipmentForOrder(orderId: string): ShipmentRecord | undefined {
+  async getShipmentForOrder(orderId: string): Promise<ShipmentRecord | undefined> {
     return this.shipments.find((s) => s.orderId === orderId)
   }
 
-  listActivityDrafts(): ActivityDraft[] {
+  async listActivityDrafts(): Promise<ActivityDraft[]> {
     return [...this.activities].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   }
 
-  listOpportunityDrafts(): OpportunityDraft[] {
+  async listOpportunityDrafts(): Promise<OpportunityDraft[]> {
     return [...this.opportunityDrafts].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   }
 
-  listAllDrafts() {
-    return [...this.listActivityDrafts(), ...this.listOpportunityDrafts()]
+  async listAllDrafts(): Promise<Array<ActivityDraft | OpportunityDraft>> {
+    return [
+      ...[...this.activities].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+      ...[...this.opportunityDrafts].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    ]
   }
 
-  upsertActivity(draft: ActivityDraft): ActivityDraft {
+  async upsertActivity(draft: ActivityDraft): Promise<ActivityDraft> {
     const idx = this.activities.findIndex((d) => d.idempotencyKey === draft.idempotencyKey)
     const next = { ...draft, updatedAt: now() }
     if (idx >= 0) this.activities[idx] = next
@@ -129,7 +162,7 @@ export class DataverseStore {
     return next
   }
 
-  upsertOpportunityDraft(draft: OpportunityDraft): OpportunityDraft {
+  async upsertOpportunityDraft(draft: OpportunityDraft): Promise<OpportunityDraft> {
     const idx = this.opportunityDrafts.findIndex((d) => d.idempotencyKey === draft.idempotencyKey)
     const next = { ...draft, updatedAt: now() }
     if (idx >= 0) this.opportunityDrafts[idx] = next
@@ -181,7 +214,10 @@ export class DataverseStore {
     return null
   }
 
-  async confirmAndSync(idempotencyKey: string, options?: { fail?: boolean }) {
+  async confirmAndSync(
+    idempotencyKey: string,
+    options?: { fail?: boolean },
+  ): Promise<ActivityDraft | OpportunityDraft | null> {
     const draft = this.getDraftByKey(idempotencyKey)
     if (!draft) throw new Error('Draft not found')
     this.updateDraftStatus(idempotencyKey, 'Confirmed', { syncError: undefined })
@@ -198,11 +234,13 @@ export class DataverseStore {
     })
   }
 
-  discardDraft(idempotencyKey: string) {
+  async discardDraft(idempotencyKey: string): Promise<ActivityDraft | OpportunityDraft | null> {
     return this.updateDraftStatus(idempotencyKey, 'Discarded')
   }
 
-  writeLog(row: Omit<InvocationLog, 'id' | 'createdAt'> & { id?: string; createdAt?: string }) {
+  async writeLog(
+    row: Omit<InvocationLog, 'id' | 'createdAt'> & { id?: string; createdAt?: string },
+  ): Promise<InvocationLog> {
     const record: InvocationLog = {
       id: row.id ?? uid('log'),
       createdAt: row.createdAt ?? now(),
@@ -222,7 +260,15 @@ export class DataverseStore {
     return record
   }
 
-  saveConversation(sessionKey: string, context: Record<string, string>, messages: unknown[]) {
+  async listLogs(limit = 50): Promise<InvocationLog[]> {
+    return this.logs.slice(0, limit)
+  }
+
+  async saveConversation(
+    sessionKey: string,
+    context: Record<string, string>,
+    messages: unknown[],
+  ): Promise<ConversationRecord> {
     const existing = this.conversations.get(sessionKey)
     const record: ConversationRecord = {
       id: existing?.id ?? uid('conv'),
@@ -235,12 +281,15 @@ export class DataverseStore {
     return record
   }
 
-  getConversation(sessionKey: string) {
+  async getConversation(sessionKey: string): Promise<ConversationRecord | undefined> {
     return this.conversations.get(sessionKey)
   }
 
-  computeMetrics() {
-    const drafts = this.listAllDrafts()
+  async computeMetrics() {
+    const drafts = [
+      ...this.activities,
+      ...this.opportunityDrafts,
+    ]
     const openDrafts = drafts.filter((d) => d.syncStatus === 'Draft').length
     const pendingSync = drafts.filter((d) =>
       ['Confirmed', 'Syncing', 'SyncFailed'].includes(d.syncStatus),
@@ -273,5 +322,4 @@ function delay(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
 }
 
-export const store = new DataverseStore()
-store.loadSeed()
+export const repository: SalesRepository = new SeedMemoryRepository()

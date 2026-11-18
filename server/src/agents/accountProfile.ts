@@ -1,25 +1,64 @@
-import { chatJson, hasDeepSeek } from '../llm/deepseek.js'
-import type { AccountRecord, AgentMessage, SourceRef } from '../types.js'
-import { store } from '../store/dataverseStore.js'
+import {
+  chatStructured,
+  chatWithTools,
+  hasDeepSeek,
+  parseStructuredJson,
+} from '../llm/deepseek.js'
+import {
+  accountProfileOutputSchema,
+} from '../llm/schemas.js'
+import type {
+  AccountRecord,
+  AgentMessage,
+  ContactRecord,
+  OpportunityRecord,
+  SourceRef,
+} from '../types.js'
+import { repository } from '../store/dataverseStore.js'
+import {
+  accountProfileToolResultSchema,
+  accountQueryTools,
+} from '../tools/readOnlyAgentTools.js'
 import { ACCOUNT_PROFILE_SYSTEM } from './prompts.js'
 
-export function resolveAccount(query: string): AccountRecord | undefined {
-  const hits = store.searchAccounts(query)
+export async function resolveAccount(query: string): Promise<AccountRecord | undefined> {
+  const hits = await repository.searchAccounts(query)
   if (hits.length) return hits[0]
-  for (const a of store.accounts) {
-    if (query.includes(a.name) || query.includes(a.externalKey)) return a
-  }
-  if (/仁济/.test(query)) return store.getAccount('SAP-ACC-RENJI')
-  if (/Alpha/i.test(query)) return store.getAccount('SAP-ACC-ALPHA')
-  if (/Beta/i.test(query)) return store.getAccount('SAP-ACC-BETA')
-  if (/Gamma/i.test(query)) return store.getAccount('SAP-ACC-GAMMA')
-  if (/Delta/i.test(query)) return store.getAccount('SAP-ACC-DELTA')
+  const knownKey = /仁济/.test(query)
+    ? 'SAP-ACC-RENJI'
+    : /Alpha/i.test(query)
+      ? 'SAP-ACC-ALPHA'
+      : /Beta/i.test(query)
+        ? 'SAP-ACC-BETA'
+        : /Gamma/i.test(query)
+          ? 'SAP-ACC-GAMMA'
+          : /Delta/i.test(query)
+            ? 'SAP-ACC-DELTA'
+            : undefined
+  if (knownKey) return repository.getAccount(knownKey)
   return undefined
 }
 
-function profileFacts(account: AccountRecord) {
-  const opps = store.getOpportunitiesForAccount(account.id)
-  const contacts = store.getContactsForAccount(account.id)
+export type AccountProfileData = {
+  contacts: Array<Pick<ContactRecord, 'id' | 'name' | 'title'>>
+  opportunities: Array<
+    Pick<
+      OpportunityRecord,
+      'id' | 'externalKey' | 'name' | 'productLine' | 'productModel' | 'stage' | 'confidenceScore'
+    >
+  >
+}
+
+async function loadProfileData(account: AccountRecord): Promise<AccountProfileData> {
+  const [contacts, opportunities] = await Promise.all([
+    repository.getContactsForAccount(account.id),
+    repository.getOpportunitiesForAccount(account.id),
+  ])
+  return { contacts, opportunities }
+}
+
+function profileFacts(account: AccountRecord, profileData: AccountProfileData) {
+  const { opportunities: opps, contacts } = profileData
   const sources: SourceRef[] = [
     {
       kind: 'dataverse',
@@ -75,11 +114,15 @@ function detectProfileFocus(utterance?: string) {
 }
 
 /** Sync heuristic — also used as DeepSeek fallback. Varies by question focus. */
-export function buildAccountProfileMessage(
+export async function buildAccountProfileMessage(
   account: AccountRecord,
   utterance?: string,
-): AgentMessage {
-  const { facts, sources, opps, contacts } = profileFacts(account)
+  profileData?: AccountProfileData,
+): Promise<AgentMessage> {
+  const { facts, sources, opps, contacts } = profileFacts(
+    account,
+    profileData ?? (await loadProfileData(account)),
+  )
   const focus = detectProfileFocus(utterance)
   const oppText =
     opps.length === 0
@@ -132,17 +175,15 @@ export function buildAccountProfileMessage(
 export async function synthesizeAccountProfile(
   account: AccountRecord,
   utterance?: string,
+  profileData?: AccountProfileData,
 ): Promise<{ message: AgentMessage; mode: 'deepseek' | 'heuristic' }> {
-  const fallback = buildAccountProfileMessage(account, utterance)
+  const data = profileData ?? (await loadProfileData(account))
+  const fallback = await buildAccountProfileMessage(account, utterance, data)
   if (!hasDeepSeek()) return { message: fallback, mode: 'heuristic' }
 
-  const { facts, sources } = profileFacts(account)
+  const { facts, sources } = profileFacts(account, data)
   try {
-    const { data, mode } = await chatJson<{
-      summary: string
-      confidence?: number
-      emphasis?: string
-    }>({
+    const { data: output, mode } = await chatStructured({
       system: ACCOUNT_PROFILE_SYSTEM,
       user: JSON.stringify({
         question: utterance || '客户最近怎么样？',
@@ -151,19 +192,53 @@ export async function synthesizeAccountProfile(
         instruction: '按问题重点组织答案，避免每次输出同一段固定套话。',
       }),
       temperature: 0.4,
+      schema: accountProfileOutputSchema,
     })
-    if (!data.summary?.trim()) return { message: fallback, mode: 'heuristic' }
+    if (!output.summary.trim()) return { message: fallback, mode: 'heuristic' }
     return {
       mode,
       message: {
         ...fallback,
-        content: data.summary.trim(),
-        confidence: clamp(data.confidence ?? 0.88),
+        content: output.summary.trim(),
+        confidence: clamp(output.confidence ?? 0.88),
         sources,
       },
     }
   } catch {
     return { message: fallback, mode: 'heuristic' }
+  }
+}
+
+/** Model-selected, read-only account lookup followed by schema-validated synthesis. */
+export async function queryAccountProfileWithTools(
+  utterance: string,
+  knownAccountId?: string,
+): Promise<{ account: AccountRecord; message: AgentMessage; mode: 'deepseek' }> {
+  const { finalText, toolResults } = await chatWithTools({
+    system: `${ACCOUNT_PROFILE_SYSTEM}\n\n先使用工具查询客户事实，再基于工具结果回答。有已知客户 ID 时直接调用 get_account_profile；否则先调用 search_accounts，再用匹配项 ID 调用 get_account_profile。只输出 JSON：{"summary":"...","confidence":0到1,"emphasis":"credit|visits|opportunities|contacts|overview"}。工具未返回的数据不得推测。`,
+    user: JSON.stringify({ question: utterance, knownAccountId }),
+    tools: accountQueryTools,
+    temperature: 0.2,
+    maxToolRounds: 3,
+  })
+
+  const rawProfile = toolResults.find((item) => item.name === 'get_account_profile')?.result
+  const profile = accountProfileToolResultSchema.parse(rawProfile)
+  const account = profile.account
+  const profileData: AccountProfileData = {
+    contacts: profile.contacts,
+    opportunities: profile.opportunities,
+  }
+  const fallback = await buildAccountProfileMessage(account, utterance, profileData)
+  const output = parseStructuredJson(finalText, accountProfileOutputSchema)
+  return {
+    account,
+    mode: 'deepseek',
+    message: {
+      ...fallback,
+      content: output.summary,
+      confidence: clamp(output.confidence ?? fallback.confidence),
+    },
   }
 }
 

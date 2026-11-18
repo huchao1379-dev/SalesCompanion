@@ -1,7 +1,8 @@
 import cors from 'cors'
 import express from 'express'
-import { config, hasDeepSeek, hasRemoteDataverse } from './config.js'
+import { config, hasDeepSeek } from './config.js'
 import { apiRouter } from './routes/api.js'
+import { repository } from './store/dataverseStore.js'
 
 const app = express()
 app.use(cors())
@@ -13,6 +14,6 @@ app.listen(config.port, config.host, () => {
   console.log(`  AI provider: ${config.aiProvider}`)
   console.log(`  DeepSeek: ${hasDeepSeek() ? 'ON (' + config.deepseekModel + ')' : 'OFF → heuristic fallback'}`)
   console.log(
-    `  Dataverse: ${hasRemoteDataverse() ? 'remote Web API' : 'in-memory seed (dataverse/seed/seed.json)'}`,
+    `  Data repository: ${repository.mode} (dataverse/seed/seed.json)`,
   )
 })

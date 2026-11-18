@@ -10,7 +10,8 @@
  */
 import type { DomainAgent } from './agentTypes.js'
 import * as tools from '../tools/dataverseTools.js'
-import { chatJson, hasDeepSeek } from '../llm/deepseek.js'
+import { chatStructured, hasDeepSeek } from '../llm/deepseek.js'
+import { workSummaryOutputSchema } from '../llm/schemas.js'
 import { WORK_SUMMARY_SYSTEM } from './prompts.js'
 
 export const workSummaryAgent: DomainAgent = {
@@ -19,7 +20,7 @@ export const workSummaryAgent: DomainAgent = {
   description: '根据今日活动/草稿生成简短工作总结（DeepSeek 或启发式）',
   intents: ['work_summary'],
   async run(ctx) {
-    const drafts = tools.listActivityDrafts().filter((d) => d.syncStatus !== 'Discarded')
+    const drafts = (await tools.listActivityDrafts()).filter((d) => d.syncStatus !== 'Discarded')
     const today = new Date().toISOString().slice(0, 10)
     const todays = drafts.filter((d) => (d.updatedAt || d.createdAt).startsWith(today))
     const list = (todays.length ? todays : drafts).slice(0, 5)
@@ -58,7 +59,7 @@ export const workSummaryAgent: DomainAgent = {
 
     if (hasDeepSeek()) {
       try {
-        const { data, mode: m } = await chatJson<{ summary: string; confidence?: number }>({
+        const { data, mode: m } = await chatStructured({
           system: WORK_SUMMARY_SYSTEM,
           user: JSON.stringify({
             request: ctx.utterance,
@@ -67,8 +68,9 @@ export const workSummaryAgent: DomainAgent = {
             instruction: '按本次请求口吻撰写，避免每次同一段套话。',
           }),
           temperature: 0.4,
+          schema: workSummaryOutputSchema,
         })
-        if (data.summary?.trim()) {
+        if (data.summary.trim()) {
           content = data.summary.trim()
           mode = m
           confidence = Math.max(0, Math.min(1, data.confidence ?? 0.82))

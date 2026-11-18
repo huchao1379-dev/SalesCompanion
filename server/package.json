@@ -10,6 +10,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "build": "tsc",
+    "test": "tsx --test test/*.test.ts",
     "start:prod": "node dist/index.js",
     "typecheck": "tsc --noEmit"
   },

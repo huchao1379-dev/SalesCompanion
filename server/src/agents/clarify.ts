@@ -1,16 +1,10 @@
-import { chatJson, hasDeepSeek } from '../llm/deepseek.js'
+import { chatStructured, hasDeepSeek } from '../llm/deepseek.js'
+import { clarifyOutputSchema } from '../llm/schemas.js'
 import type { AgentMessage } from '../types.js'
 import { CLARIFY_SYSTEM } from './prompts.js'
 
 function uid(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`
-}
-
-type ClarifyPayload = {
-  reply?: string
-  confidence?: number
-  focus?: string
-  examples?: string[]
 }
 
 export type ClarifyOptions = {
@@ -109,7 +103,7 @@ export async function buildClarifyReply(
   if (!hasDeepSeek()) return { message: fallback, mode: 'heuristic' }
 
   try {
-    const { data, mode } = await chatJson<ClarifyPayload>({
+    const { data, mode } = await chatStructured({
       system: CLARIFY_SYSTEM,
       user: JSON.stringify({
         utterance,
@@ -120,9 +114,10 @@ export async function buildClarifyReply(
           '按用户原话定制回复。禁止输出固定四条编号能力清单作为唯一正文；若介绍能力，用自然段落并配合不同示例。',
       }),
       temperature: 0.55,
+      schema: clarifyOutputSchema,
     })
 
-    const reply = data.reply?.trim()
+    const reply = data.reply.trim()
     if (!reply) return { message: fallback, mode: 'heuristic' }
 
     // Guard against the old canned template if the model regresses.

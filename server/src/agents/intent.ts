@@ -1,14 +1,9 @@
-import { chatJson, hasDeepSeek } from '../llm/deepseek.js'
+import { chatStructured, hasDeepSeek } from '../llm/deepseek.js'
+import { intentOutputSchema } from '../llm/schemas.js'
 import type { Intent } from '../types.js'
 import { INTENT_SYSTEM } from './prompts.js'
 
-const INTENTS: Intent[] = [
-  'capture_visit',
-  'query_account',
-  'query_order',
-  'work_summary',
-  'clarify',
-]
+const INTENTS: Intent[] = ['capture_visit', 'query_account', 'query_order', 'work_summary', 'clarify']
 
 function isIntent(v: unknown): v is Intent {
   return typeof v === 'string' && (INTENTS as string[]).includes(v)
@@ -22,22 +17,14 @@ export async function classifyIntent(utterance: string): Promise<{
 }> {
   if (hasDeepSeek()) {
     try {
-      const { data, mode } = await chatJson<{
-        intent: Intent
-        confidence?: number
-        reason?: string
-      }>({
+      const { data, mode } = await chatStructured({
         system: INTENT_SYSTEM,
         user: JSON.stringify({ utterance }),
         temperature: 0.1,
+        schema: intentOutputSchema,
       })
       if (isIntent(data.intent)) {
-        return {
-          intent: data.intent,
-          confidence: data.confidence ?? 0.8,
-          mode,
-          reason: data.reason,
-        }
+        return { intent: data.intent, confidence: data.confidence ?? 0.8, mode, reason: data.reason }
       }
     } catch {
       /* fall through */

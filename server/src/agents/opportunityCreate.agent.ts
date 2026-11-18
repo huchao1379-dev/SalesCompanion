@@ -31,7 +31,7 @@ export const opportunityCreateAgent: DomainAgent = {
       activity: ctx.state.activity,
       sessionKey: ctx.sessionKey,
     })
-    tools.upsertOpportunityDraft(opportunity)
+    await tools.upsertOpportunityDraft(opportunity)
 
     return {
       drafts: [opportunity],
