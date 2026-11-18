@@ -82,6 +82,11 @@ export type OpportunityDraftPayload = {
 
 export type DraftPayload = ActivityDraftPayload | OpportunityDraftPayload
 
+/** UI delivery state for assistant turns — not model internal reasoning. */
+export type MessageDeliveryStatus = 'pending' | 'complete' | 'stopped' | 'error'
+
+export type MessageFailureKind = 'network' | 'query' | 'generation' | 'write' | 'unknown'
+
 export type AgentMessage = {
   id: string
   role: AgentRole
@@ -92,6 +97,14 @@ export type AgentMessage = {
   draft?: DraftPayload
   agent_chain?: string[]
   createdAt: string
+  /** When the assistant finished generating (distinct from createdAt / send time). */
+  completedAt?: string
+  deliveryStatus?: MessageDeliveryStatus
+  failureKind?: MessageFailureKind
+  /** User-facing progress line while pending (not chain-of-thought). */
+  progressLabel?: string
+  /** Utterance to re-run on retry without duplicating the user bubble. */
+  retryUtterance?: string
 }
 
 export type OrchestratorRequest = {
@@ -106,7 +119,7 @@ export type OrchestratorResponse = {
   context: Record<string, string>
   latencyMs: number
   intent?: string
-  mode?: 'deepseek' | 'heuristic'
+  mode?: 'deepseek' | 'heuristic' | 'copilotstudio'
 }
 
 export type AccountProfile = {

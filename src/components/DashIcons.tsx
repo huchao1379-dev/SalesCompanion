@@ -174,6 +174,14 @@ export function IconSendUp({ className }: IconProps) {
   )
 }
 
+export function IconStop({ className }: IconProps) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <rect x="7" y="7" width="10" height="10" rx="1.5" />
+    </svg>
+  )
+}
+
 export function IconMic({ className }: IconProps) {
   return (
     <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>

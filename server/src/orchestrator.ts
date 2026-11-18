@@ -1,4 +1,5 @@
 import { config, hasDeepSeek } from './config.js'
+import { buildClarifyReply } from './agents/clarify.js'
 import { classifyIntent } from './agents/intent.js'
 import { ensureAgentsRegistered } from './agents/catalog.js'
 import { requireAgent } from './agents/registry.js'
@@ -92,20 +93,6 @@ async function runFanout(agentNames: string[], ctx: AgentContext) {
   return bag
 }
 
-function clarifyMessage(): AgentMessage {
-  return {
-    id: uid('msg'),
-    role: 'assistant',
-    agent_name: 'Orchestrator',
-    content:
-      '我可以帮你：① 录入拜访 ② 查询客户画像 ③ 查询订单物流 ④ 写工作总结。请补充一句完整需求。',
-    sources: [],
-    confidence: 0.55,
-    agent_chain: ['Orchestrator'],
-    createdAt: new Date().toISOString(),
-  }
-}
-
 function synthesizeVisitComposite(
   ctx: AgentContext,
   _drafts: DraftPayload[],
@@ -114,6 +101,7 @@ function synthesizeVisitComposite(
   const account = ctx.state.account
   const opportunity = ctx.state.opportunity
   const activity = ctx.state.activity
+  const extracted = ctx.state.extracted
   if (!activity && !opportunity) return stepMessages
 
   const chain = [
@@ -121,20 +109,42 @@ function synthesizeVisitComposite(
     '客户画像 Agent',
     '活动创建 Agent',
     '商机创建 Agent',
-    '商机督导 Agent',
   ]
+
+  const product = [extracted?.productLine, extracted?.productModel].filter(Boolean).join(' ')
+  const qty = extracted?.quantity ? `${extracted.quantity} 台` : ''
+  const contact = extracted?.contactName || activity?.contactName
+  const head = account
+    ? `已根据你的口述生成草稿：${account.name}`
+    : '已根据口述生成草稿，但客户未命中种子库'
+  const detailParts = [
+    contact ? `对接 ${contact}` : null,
+    product ? `意向 ${product}${qty ? ` × ${qty}` : ''}` : null,
+  ].filter(Boolean)
+  const accountMeta = account
+    ? `信用 ${account.creditLevel} / 近 30 天 ${account.visitCount30d} 次拜访`
+    : null
+  const oppLine = opportunity?.reuseExisting
+    ? `商机建议追加既有 ${opportunity.existingOpportunityRef}`
+    : opportunity
+      ? '并已生成新商机草稿'
+      : '已生成活动草稿'
+  const tail = account ? '请确认或编辑后提交。' : '请先编辑客户名称再确认。'
+
+  const content = [
+    [head, ...detailParts].filter(Boolean).join('，'),
+    accountMeta,
+    `${oppLine}。${tail}`,
+  ]
+    .filter(Boolean)
+    .join('。')
+    .replace(/。。+/g, '。')
 
   const composite: AgentMessage = {
     id: uid('msg'),
     role: 'assistant',
     agent_name: 'Orchestrator',
-    content: account
-      ? `已识别「活动录入 + 商机线索」。${account.name}（信用 ${account.creditLevel} / 近 30 天 ${account.visitCount30d} 次拜访）。已生成活动草稿；${
-          opportunity?.reuseExisting
-            ? `商机侧建议追加既有 ${opportunity.existingOpportunityRef}`
-            : '已生成新商机草稿'
-        }。请确认或编辑后提交。`
-      : '已根据口述生成草稿，但客户未命中种子库，请编辑客户名称后确认。',
+    content,
     sources: activity?.sources ?? [],
     confidence: Math.min(
       activity?.confidence ?? 1,
@@ -144,27 +154,11 @@ function synthesizeVisitComposite(
     createdAt: new Date().toISOString(),
   }
 
-  // Orchestrator summary first, then per-agent draft bubbles.
-  return [composite, ...stepMessages]
-}
-
-function synthesizeQueryComposite(
-  ctx: AgentContext,
-  stepMessages: AgentMessage[],
-): AgentMessage[] {
-  if (!stepMessages.length) return stepMessages
-  const profile = stepMessages[0]
-  const composite: AgentMessage = {
-    id: uid('msg'),
-    role: 'assistant',
-    agent_name: 'Orchestrator',
-    content: profile.content,
-    sources: profile.sources,
-    confidence: profile.confidence,
-    agent_chain: ['Orchestrator', '客户画像 Agent', '商机评估 Agent'],
-    createdAt: new Date().toISOString(),
-  }
-  return [composite, ...stepMessages]
+  // Summary first; keep step/draft messages that add new content.
+  const extras = stepMessages.filter(
+    (m) => m.content.trim() && m.content.trim() !== composite.content.trim(),
+  )
+  return [composite, ...extras]
 }
 
 export async function orchestrate(req: OrchestratorRequest): Promise<OrchestratorResponse> {
@@ -194,11 +188,17 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
   let drafts: DraftPayload[] = []
 
   if (intent === 'clarify') {
-    messages = [clarifyMessage()]
+    const clarify = await buildClarifyReply(utterance, { reason: intentResult.reason })
+    messages = [clarify.message]
+    ctx.modes.add(clarify.mode)
   } else {
     const pipeline = PIPELINES[intent]
     if (!pipeline || pipeline.agents.length === 0) {
-      messages = [clarifyMessage()]
+      const clarify = await buildClarifyReply(utterance, {
+        reason: intentResult.reason || '无可用流水线',
+      })
+      messages = [clarify.message]
+      ctx.modes.add(clarify.mode)
     } else {
       const bag =
         pipeline.mode === 'fanout'
@@ -211,26 +211,9 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
           ctx.state.activity || ctx.state.opportunity
             ? synthesizeVisitComposite(ctx, drafts, bag.messages)
             : bag.messages
-      } else if (intent === 'query_account') {
-        messages = synthesizeQueryComposite(ctx, bag.messages)
-      } else if (intent === 'query_order') {
-        const orderMsg = bag.messages[0]
-        messages = orderMsg
-          ? [
-              {
-                id: uid('msg'),
-                role: 'assistant',
-                agent_name: 'Orchestrator',
-                content: orderMsg.content,
-                sources: orderMsg.sources,
-                confidence: orderMsg.confidence,
-                agent_chain: orderMsg.agent_chain,
-                createdAt: new Date().toISOString(),
-              },
-              ...bag.messages,
-            ]
-          : bag.messages
       } else {
+        // query_account / query_order / work_summary: use agent messages directly
+        // (avoid duplicating the same content under an Orchestrator wrapper).
         messages = bag.messages
       }
     }

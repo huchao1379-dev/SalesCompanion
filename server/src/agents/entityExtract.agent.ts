@@ -14,15 +14,18 @@ export const entityExtractAgent: DomainAgent = {
     const { extracted, mode } = await extractVisit(ctx.utterance)
 
     if (!extracted.accountName && extracted.confidence < 0.6) {
+      const missing: string[] = ['客户名称']
+      if (!extracted.contactName) missing.push('联系人')
+      if (!extracted.productLine && !extracted.productModel) missing.push('产品')
+      if (!extracted.quantity) missing.push('数量')
       const msg: AgentMessage = {
         id: uid('msg'),
         role: 'assistant',
-        agent_name: 'Orchestrator',
-        content:
-          '置信度偏低：请补充客户名称（例如上海仁济医院），以及联系人/产品/数量，以便生成草稿。',
+        agent_name: '实体抽取',
+        content: `信息还不够生成草稿，目前缺：${missing.join('、')}。例如可以说「刚拜访上海仁济医院张主任，他们对 N17 监护仪感兴趣，大概 8 台，下周三再约」。`,
         sources: [{ kind: 'other', label: '实体抽取', ref: 'extract' }],
         confidence: extracted.confidence,
-        agent_chain: ['Orchestrator', 'EntityExtract'],
+        agent_chain: ['EntityExtract'],
         createdAt: new Date().toISOString(),
       }
       return { messages: [msg], statePatch: { extracted }, halt: true, mode }

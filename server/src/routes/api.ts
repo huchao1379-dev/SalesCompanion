@@ -1,5 +1,6 @@
 import { Router } from 'express'
-import { config, hasDeepSeek, hasRemoteDataverse } from '../config.js'
+import { config, hasCopilotStudioConfig, hasDeepSeek, hasRemoteDataverse } from '../config.js'
+import { CopilotStudioConfigurationError, copilotStudioOrchestrate } from '../copilotStudio.js'
 import { orchestrate } from '../orchestrator.js'
 import { store } from '../store/dataverseStore.js'
 import { resolveAccount, synthesizeAccountProfile } from '../agents/accountProfile.js'
@@ -12,7 +13,9 @@ apiRouter.get('/health', (_req, res) => {
   ensureAgentsRegistered()
   res.json({
     ok: true,
+    aiProvider: config.aiProvider,
     deepseek: hasDeepSeek(),
+    copilotstudio: hasCopilotStudioConfig(),
     dataverseRemote: hasRemoteDataverse(),
     dataverseMode: hasRemoteDataverse() ? 'webapi' : 'in-memory-seed',
     promptVersion: config.promptVersion,
@@ -26,18 +29,21 @@ apiRouter.get('/agents', (_req, res) => {
   res.json({ agents: getCatalogSummary() })
 })
 
-apiRouter.post('/orchestrate', async (req, res) => {
+async function handleOrchestrate(req: import('express').Request, res: import('express').Response, useCopilotStudio = false) {
   try {
     const utterance = String(req.body?.utterance || '').trim()
     if (!utterance) {
       res.status(400).json({ error: 'utterance required' })
       return
     }
-    const result = await orchestrate({
+    const payload = {
       utterance,
       locale: req.body?.locale,
       context: req.body?.context,
-    })
+    }
+    const result = useCopilotStudio
+      ? await copilotStudioOrchestrate(payload)
+      : await orchestrate(payload)
     res.json(result)
   } catch (err) {
     store.writeLog({
@@ -47,9 +53,14 @@ apiRouter.post('/orchestrate', async (req, res) => {
       success: false,
       errorMessage: err instanceof Error ? err.message : 'unknown',
     })
-    res.status(500).json({ error: err instanceof Error ? err.message : 'orchestrate failed' })
+    const status = err instanceof CopilotStudioConfigurationError ? 503 : 500
+    res.status(status).json({ error: err instanceof Error ? err.message : 'orchestrate failed' })
   }
-})
+}
+
+apiRouter.post('/orchestrate', (req, res) => handleOrchestrate(req, res))
+/** Explicit Copilot Studio SDK endpoint. DeepSeek remains available through /orchestrate when enabled. */
+apiRouter.post('/copilot/message', (req, res) => handleOrchestrate(req, res, true))
 
 apiRouter.get('/drafts', (_req, res) => {
   res.json({ drafts: store.listAllDrafts() })

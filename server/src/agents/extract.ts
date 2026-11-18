@@ -1,19 +1,6 @@
 import { chatJson, hasDeepSeek } from '../llm/deepseek.js'
 import type { ExtractedVisit } from '../types.js'
-
-const SYSTEM = `你是医疗设备销售拜访实体抽取器。只输出 JSON：
-{
-  "accountName": string|null,
-  "contactName": string|null,
-  "productLine": string|null,
-  "productModel": string|null,
-  "quantity": number|null,
-  "followUpHint": string|null,
-  "visitType": "Visit"|"Call"|"Demo"|"FollowUp",
-  "summary": string,
-  "confidence": number
-}
-产品线与型号分开，如 监护仪 + N17。`
+import { EXTRACT_SYSTEM } from './prompts.js'
 
 export async function extractVisit(utterance: string): Promise<{
   extracted: ExtractedVisit
@@ -22,8 +9,8 @@ export async function extractVisit(utterance: string): Promise<{
   if (hasDeepSeek()) {
     try {
       const { data, mode } = await chatJson<ExtractedVisit>({
-        system: SYSTEM,
-        user: utterance,
+        system: EXTRACT_SYSTEM,
+        user: JSON.stringify({ utterance }),
         temperature: 0.1,
       })
       return {

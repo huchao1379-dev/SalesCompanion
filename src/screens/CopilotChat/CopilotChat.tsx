@@ -1,20 +1,29 @@
 import './CopilotChat.css'
-import { useEffect, useRef, useState } from 'react'
-import type { AgentMessage, DraftPayload } from '../../agents/types'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { ApiRequestError } from '../../api/client'
+import type {
+  AgentMessage,
+  DraftPayload,
+  MessageFailureKind,
+} from '../../agents/types'
+import { copilotOrchestrate } from '../../agents/copilotStudioClient'
 import { getOrchestratorMode, orchestrate } from '../../agents/orchestratorClient'
-import { AgentLabel } from '../../components/AgentLabel'
 import { DraftCard } from '../../components/DraftCard'
 import {
   IconBack,
   IconMic,
   IconPaperclip,
   IconSendUp,
+  IconStop,
 } from '../../components/DashIcons'
 import { SourceChips } from '../../components/SourceChips'
 import {
   appendMessages,
   clearConversation,
   loadConversation,
+  replaceMessage,
+  updateMessage,
+  type ConversationState,
 } from '../../data/conversationStore'
 import { confirmAndSync, discardDraft, upsertDraft } from '../../data/dataverse'
 import { useWebSpeech } from '../../speech/useWebSpeech'
@@ -28,16 +37,39 @@ type PendingAttachment = {
   previewUrl?: string
 }
 
+type GenerationHandle = {
+  id: number
+  controller: AbortController
+  stopped: boolean
+  completed: boolean
+  assistantId: string
+}
+
 const ATTACH_ACCEPT =
   'image/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.md'
 const ATTACH_MAX_COUNT = 5
 const ATTACH_MAX_BYTES = 10 * 1024 * 1024
+const BOT_NAME = 'Copilot'
+const NEAR_BOTTOM_PX = 96
+const TIME_GROUP_MS = 2 * 60 * 1000
 
-function formatBytes(n: number) {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
-}
+const PROGRESS_PHASES = [
+  { afterMs: 0, label: '正在理解问题' },
+  { afterMs: 1400, label: '正在查询相关信息' },
+  { afterMs: 3800, label: '正在整理答复' },
+] as const
+
+const HELP_ITEMS = [
+  '查询客户信息与商机状态',
+  '查看今日日程与待办',
+  '分析销售趋势与业绩数据',
+]
+
+const QUICK_CHIPS = [
+  { label: "Today's tasks", prompt: "What's on my agenda today?" },
+  { label: 'Pipeline status', prompt: 'Summarize my current pipeline status.' },
+  { label: 'Follow-ups', prompt: 'What follow-ups should I do next?' },
+]
 
 type Props = {
   initialPrompt?: string
@@ -47,19 +79,147 @@ type Props = {
   onOpenTasks?: () => void
 }
 
-const HELP_ITEMS = [
-  'Query customer info and opportunity status.',
-  "Get today's schedule and to-do items.",
-  'Analyze sales trends and performance data.',
-]
+const CHAT_PROVIDER =
+  import.meta.env.VITE_CHAT_PROVIDER?.trim().toLowerCase() === 'deepseek'
+    ? 'deepseek'
+    : 'copilotstudio'
 
-const QUICK_CHIPS = [
-  { label: "Today's tasks", prompt: "What's on my agenda today?" },
-  { label: 'Pipeline status', prompt: 'Summarize my current pipeline status.' },
-  { label: 'Follow-ups', prompt: 'What follow-ups should I do next?' },
-]
+function formatBytes(n: number) {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
 
-export function CopilotChat({
+function uid(prefix: string) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function isSameDay(a: Date, b: Date) {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  )
+}
+
+function formatClock(d: Date) {
+  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+function formatMessageTime(iso: string, now = new Date()) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  if (isSameDay(d, now)) return formatClock(d)
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (isSameDay(d, yesterday)) return `昨天 ${formatClock(d)}`
+  return `${d.getMonth() + 1}/${d.getDate()} ${formatClock(d)}`
+}
+
+function shouldShowTimestamp(messages: AgentMessage[], index: number) {
+  const current = messages[index]
+  const next = messages[index + 1]
+  if (!current?.createdAt) return false
+  if (!next) return true
+  if (next.role !== current.role) return true
+  const a = new Date(current.createdAt).getTime()
+  const b = new Date(next.createdAt).getTime()
+  if (Number.isNaN(a) || Number.isNaN(b)) return true
+  return Math.abs(b - a) > TIME_GROUP_MS
+}
+
+function dedupeAssistantMessages(messages: AgentMessage[]): AgentMessage[] {
+  const out: AgentMessage[] = []
+  for (const m of messages) {
+    const prev = out[out.length - 1]
+    if (
+      prev &&
+      m.role !== 'user' &&
+      prev.role !== 'user' &&
+      prev.content.trim() === m.content.trim() &&
+      prev.content.trim().length > 0
+    ) {
+      out[out.length - 1] = {
+        ...prev,
+        sources: prev.sources.length ? prev.sources : m.sources,
+        agent_chain: prev.agent_chain?.length ? prev.agent_chain : m.agent_chain,
+        confidence: Math.max(prev.confidence, m.confidence),
+      }
+      continue
+    }
+    out.push(m)
+  }
+  return out
+}
+
+function normalizeAssistantMessages(messages: AgentMessage[], completedAt: string): AgentMessage[] {
+  return dedupeAssistantMessages(messages).map((m) => ({
+    ...m,
+    // Keep backend agent_name for bubble attribution ("来源").
+    deliveryStatus: m.deliveryStatus ?? 'complete',
+    completedAt: m.completedAt ?? completedAt,
+  }))
+}
+
+function messageOriginLabel(m: AgentMessage) {
+  if (m.role === 'user') return '你'
+  const name = m.agent_name?.trim()
+  if (name && !/^you$/i.test(name)) return name
+  const steps = footprintSteps(m)
+  if (steps.length) return steps.join(' · ')
+  return BOT_NAME
+}
+
+function classifyFailure(err: unknown): {
+  kind: MessageFailureKind
+  content: string
+} {
+  if (err instanceof ApiRequestError) {
+    if (err.kind === 'network') {
+      return { kind: 'network', content: '暂时无法连接服务，请检查网络后重试' }
+    }
+    const detail = `${err.detail || ''} ${err.message}`.toLowerCase()
+    if (/query|查询|dataverse|sap|订单|物流/.test(detail)) {
+      return { kind: 'query', content: '查询失败，请稍后重试' }
+    }
+    if (/sync|write|写入|confirm|draft|同步/.test(detail)) {
+      return { kind: 'write', content: '业务写入失败，请稍后重试' }
+    }
+    return { kind: 'generation', content: '回答生成失败，请稍后重试' }
+  }
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase()
+    if (/failed to fetch|network|load failed|连接/.test(msg)) {
+      return { kind: 'network', content: '暂时无法连接服务，请检查网络后重试' }
+    }
+  }
+  return { kind: 'unknown', content: '回答生成失败，请稍后重试' }
+}
+
+function failureLabel(kind?: MessageFailureKind) {
+  if (kind === 'network') return '网络错误'
+  if (kind === 'query') return '查询失败'
+  if (kind === 'write') return '写入失败'
+  if (kind === 'generation') return '生成失败'
+  return '请求失败'
+}
+
+function hasExplainableConfidence(m: AgentMessage) {
+  if (!(m.confidence > 0) || !m.sources?.length) return false
+  return m.sources.some((s) => s.kind === 'dataverse' || s.kind === 'sap')
+}
+
+function footprintSteps(m: AgentMessage) {
+  const chain = (m.agent_chain || []).filter(Boolean)
+  const unique = [...new Set(chain.map((c) => c.trim()).filter(Boolean))]
+  return unique.filter((c) => !/^orchestrator$/i.test(c) && c !== BOT_NAME)
+}
+
+export function CopilotChat(props: Props) {
+  return <NativeChat {...props} />
+}
+
+function NativeChat({
   initialPrompt = '',
   onBack,
   onOpenAccount,
@@ -67,24 +227,29 @@ export function CopilotChat({
   onOpenTasks,
 }: Props) {
   const speech = useWebSpeech()
-  const inputRef = useRef<HTMLInputElement | null>(null)
+  const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const bodyRef = useRef<HTMLDivElement | null>(null)
+  const stickToBottomRef = useRef(true)
+  const genRef = useRef<GenerationHandle | null>(null)
+  const genSeqRef = useRef(0)
   const [input, setInput] = useState(initialPrompt)
-  const [conversation, setConversation] = useState(() => loadConversation())
+  const [conversation, setConversation] = useState<ConversationState>(() => loadConversation())
+  const conversationRef = useRef(conversation)
   const [busy, setBusy] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [drafts, setDrafts] = useState<DraftPayload[]>([])
-  const [status, setStatus] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
+  const [showNewMsgHint, setShowNewMsgHint] = useState(false)
+  const [clearArmed, setClearArmed] = useState(false)
+
   const messages = conversation.messages
   const isEmpty = messages.length === 0
-  const canSend = Boolean(input.trim() || attachments.length) && !busy
+  const hasSendable = Boolean(input.trim() || attachments.length)
+  const canSend = hasSendable && !busy && !generating
+  const accountKey = conversation.context.accountRef || conversation.context.accountId
 
   useEffect(() => {
-    if (initialPrompt) setInput(initialPrompt)
-  }, [initialPrompt])
-
-  useEffect(() => {
-    // Avoid auto-focus on iOS: Safari zooms/pans the page and creates scrollbars.
     const isIOS =
       /iP(hone|od|ad)/.test(navigator.userAgent) ||
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
@@ -94,14 +259,56 @@ export function CopilotChat({
   }, [])
 
   const attachmentsRef = useRef(attachments)
-  attachmentsRef.current = attachments
+  useEffect(() => {
+    attachmentsRef.current = attachments
+  }, [attachments])
   useEffect(() => {
     return () => {
       attachmentsRef.current.forEach((a) => {
         if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
       })
+      genRef.current?.controller.abort()
     }
   }, [])
+
+  useEffect(() => {
+    if (!clearArmed) return
+    const t = window.setTimeout(() => setClearArmed(false), 4000)
+    return () => window.clearTimeout(t)
+  }, [clearArmed])
+
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el) return
+    if (!stickToBottomRef.current) {
+      setShowNewMsgHint(true)
+      return
+    }
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    setShowNewMsgHint(false)
+  }, [messages, drafts, generating])
+
+  function onBodyScroll() {
+    const el = bodyRef.current
+    if (!el) return
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+    const nearBottom = distance < NEAR_BOTTOM_PX
+    stickToBottomRef.current = nearBottom
+    if (nearBottom) setShowNewMsgHint(false)
+  }
+
+  function scrollToLatest() {
+    const el = bodyRef.current
+    if (!el) return
+    stickToBottomRef.current = true
+    setShowNewMsgHint(false)
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  }
+
+  function setConversationState(next: ConversationState) {
+    conversationRef.current = next
+    setConversation(next)
+  }
 
   function clearAttachments(list: PendingAttachment[] = attachments) {
     list.forEach((a) => {
@@ -138,7 +345,7 @@ export function CopilotChat({
     }
 
     if (next.length) setAttachments((prev) => [...prev, ...next])
-    if (errors.length) setStatus(errors[0])
+    if (errors.length) console.warn('[chat] attach', errors[0])
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -150,10 +357,173 @@ export function CopilotChat({
     })
   }
 
+  function startProgressTicker(assistantId: string, generationId: number) {
+    const timers: number[] = []
+    for (const phase of PROGRESS_PHASES) {
+      if (phase.afterMs === 0) continue
+      const t = window.setTimeout(() => {
+        const handle = genRef.current
+        if (!handle || handle.id !== generationId || handle.stopped || handle.completed) return
+        const next = updateMessage(conversationRef.current, assistantId, {
+          progressLabel: phase.label,
+        })
+        setConversationState(next)
+      }, phase.afterMs)
+      timers.push(t)
+    }
+    return () => timers.forEach((t) => window.clearTimeout(t))
+  }
+
+  async function runGeneration(utterance: string, opts?: { retryAssistantId?: string }) {
+    // Guard with refs to avoid double-submit from stale closures.
+    if (genRef.current) return
+
+    const stamp = new Date().toISOString()
+    const controller = new AbortController()
+    const generationId = ++genSeqRef.current
+    const assistantId = opts?.retryAssistantId || uid('asst')
+
+    // Reserve the slot immediately so a second Enter cannot start another turn.
+    genRef.current = {
+      id: generationId,
+      controller,
+      stopped: false,
+      completed: false,
+      assistantId,
+    }
+    setGenerating(true)
+    setClearArmed(false)
+
+    const pendingMsg: AgentMessage = {
+      id: assistantId,
+      role: 'assistant',
+      agent_name: BOT_NAME,
+      content: '',
+      sources: [],
+      confidence: 0,
+      createdAt: stamp,
+      deliveryStatus: 'pending',
+      progressLabel: PROGRESS_PHASES[0].label,
+      retryUtterance: utterance,
+    }
+
+    let base = conversationRef.current
+    if (opts?.retryAssistantId) {
+      base = updateMessage(base, assistantId, {
+        content: '',
+        sources: [],
+        confidence: 0,
+        createdAt: stamp,
+        completedAt: undefined,
+        deliveryStatus: 'pending',
+        progressLabel: PROGRESS_PHASES[0].label,
+        failureKind: undefined,
+        retryUtterance: utterance,
+        agent_name: BOT_NAME,
+        agent_chain: undefined,
+      })
+    } else {
+      base = appendMessages(base, [pendingMsg])
+    }
+    setConversationState(base)
+
+    const handle = genRef.current!
+    const stopTicker = startProgressTicker(assistantId, generationId)
+
+    try {
+      const runAgent = CHAT_PROVIDER === 'deepseek' ? orchestrate : copilotOrchestrate
+      const res = await runAgent(
+        {
+          utterance,
+          context: {
+            ...conversationRef.current.context,
+            conversationId: conversationRef.current.conversationId,
+          },
+        },
+        { signal: controller.signal },
+      )
+
+      // Superseded by a newer turn — ignore. If stop raced with a finished response,
+      // prefer the completed reply over a "stopped" label.
+      if (genRef.current?.id !== generationId) return
+
+      handle.completed = true
+      handle.stopped = false
+      const completedAt = new Date().toISOString()
+      res.drafts.forEach((d) => upsertDraft(d))
+      setDrafts(res.drafts)
+
+      const normalized = normalizeAssistantMessages(res.messages, completedAt)
+      const next = replaceMessage(
+        conversationRef.current,
+        assistantId,
+        normalized.length
+          ? normalized
+          : [
+              {
+                id: assistantId,
+                role: 'assistant',
+                agent_name: BOT_NAME,
+                content: '暂时没有可展示的答复。',
+                sources: [],
+                confidence: 0,
+                createdAt: stamp,
+                completedAt,
+                deliveryStatus: 'complete',
+              },
+            ],
+        res.context,
+      )
+      setConversationState(next)
+      console.info(
+        `[chat] ok intent=${res.intent || '—'} mode=${res.mode || getOrchestratorMode()} ${res.latencyMs}ms`,
+      )
+    } catch (err) {
+      if (handle.completed || genRef.current?.id !== generationId) return
+
+      const aborted =
+        handle.stopped || (err instanceof ApiRequestError && err.kind === 'abort')
+      if (aborted) {
+        const stoppedAt = new Date().toISOString()
+        const current = conversationRef.current.messages.find((m) => m.id === assistantId)
+        const next = updateMessage(conversationRef.current, assistantId, {
+          deliveryStatus: 'stopped',
+          progressLabel: undefined,
+          completedAt: stoppedAt,
+          content: current?.content?.trim() ? current.content : '',
+        })
+        setConversationState(next)
+        return
+      }
+
+      console.error('[chat] orchestrate failed', err)
+      const failure = classifyFailure(err)
+      const errAt = new Date().toISOString()
+      const next = updateMessage(conversationRef.current, assistantId, {
+        deliveryStatus: 'error',
+        failureKind: failure.kind,
+        content: failure.content,
+        progressLabel: undefined,
+        completedAt: errAt,
+        confidence: 0,
+        sources: [],
+        retryUtterance: utterance,
+      })
+      setConversationState(next)
+    } finally {
+      stopTicker()
+      if (genRef.current?.id === generationId) {
+        genRef.current = null
+      }
+      setGenerating(Boolean(genRef.current))
+      inputRef.current?.focus()
+    }
+  }
+
   async function send(text: string) {
     const trimmed = text.trim()
     const pending = attachments
-    if ((!trimmed && pending.length === 0) || busy) return
+    if ((!trimmed && pending.length === 0) || busy || generating) return
 
     const attachLine =
       pending.length === 0
@@ -161,11 +531,9 @@ export function CopilotChat({
         : `【附件 ${pending.length}】${pending.map((a) => `${a.name}（${a.sizeLabel}）`).join('、')}`
     const utterance = [attachLine, trimmed || '请结合附件帮我处理'].filter(Boolean).join('\n')
 
-    setBusy(true)
-    setStatus(`编排中（${getOrchestratorMode()}）…`)
     const stamp = new Date().toISOString()
     const userMsg: AgentMessage = {
-      id: `user_${stamp}`,
+      id: uid('user'),
       role: 'user',
       agent_name: '你',
       content: utterance,
@@ -176,42 +544,38 @@ export function CopilotChat({
       })),
       confidence: 1,
       createdAt: stamp,
+      deliveryStatus: 'complete',
     }
+
     clearAttachments(pending)
-    const withUser = appendMessages(conversation, [userMsg])
-    setConversation(withUser)
     setInput('')
-    try {
-      const res = await orchestrate({
-        utterance,
-        context: { ...withUser.context, conversationId: withUser.conversationId },
+    const withUser = appendMessages(conversationRef.current, [userMsg])
+    setConversationState(withUser)
+    stickToBottomRef.current = true
+    await runGeneration(utterance)
+  }
+
+  function stopGeneration() {
+    const handle = genRef.current
+    if (!handle || handle.completed) return
+    handle.stopped = true
+    handle.controller.abort()
+    // Optimistic UI while abort settles; success path may still win the race.
+    const current = conversationRef.current.messages.find((m) => m.id === handle.assistantId)
+    if (current?.deliveryStatus === 'pending') {
+      const next = updateMessage(conversationRef.current, handle.assistantId, {
+        deliveryStatus: 'stopped',
+        progressLabel: undefined,
+        completedAt: new Date().toISOString(),
       })
-      res.drafts.forEach((d) => upsertDraft(d))
-      setDrafts(res.drafts)
-      const next = appendMessages(withUser, res.messages, res.context)
-      setConversation(next)
-      setStatus(
-        `意图 ${res.intent || '—'} · ${res.mode || getOrchestratorMode()} · ${res.latencyMs}ms`,
-      )
-    } catch (err) {
-      const errStamp = new Date().toISOString()
-      const next = appendMessages(withUser, [
-        {
-          id: `err_${errStamp}`,
-          role: 'assistant',
-          agent_name: '系统',
-          content: err instanceof Error ? err.message : '请求失败',
-          sources: [],
-          confidence: 0,
-          createdAt: errStamp,
-        },
-      ])
-      setConversation(next)
-      setStatus('编排失败')
-    } finally {
-      setBusy(false)
-      inputRef.current?.focus()
+      setConversationState(next)
     }
+  }
+
+  function retryMessage(m: AgentMessage) {
+    if (busy || generating || !m.retryUtterance) return
+    stickToBottomRef.current = true
+    void runGeneration(m.retryUtterance, { retryAssistantId: m.id })
   }
 
   function updateDraft(next: DraftPayload) {
@@ -224,6 +588,8 @@ export function CopilotChat({
     try {
       const synced = await confirmAndSync(draft)
       setDrafts((prev) => prev.map((d) => (d.idempotencyKey === synced.idempotencyKey ? synced : d)))
+    } catch (err) {
+      console.error('[chat] confirm/sync failed', err)
     } finally {
       setBusy(false)
     }
@@ -253,10 +619,39 @@ export function CopilotChat({
     void send(chip.prompt)
   }
 
-  const accountKey = conversation.context.accountRef || conversation.context.accountId
+  function onClear() {
+    if (!clearArmed) {
+      setClearArmed(true)
+      return
+    }
+    if (generating) stopGeneration()
+    setConversationState(clearConversation())
+    setDrafts([])
+    setClearArmed(false)
+    setShowNewMsgHint(false)
+  }
+
+  function onComposerKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      if (busy || generating) return
+      void send(input)
+    }
+  }
+
+  function resizeComposer() {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`
+  }
+
+  useEffect(() => {
+    resizeComposer()
+  }, [input])
 
   return (
-    <section className={`chat-screen${isEmpty ? ' is-empty' : ''}`}>
+    <section className={`chat-screen${isEmpty ? ' is-empty' : ''}`} aria-busy={busy || generating}>
       <header className="chat-screen__top">
         {onBack ? (
           <button type="button" className="chat-screen__back" aria-label="返回" onClick={onBack}>
@@ -268,22 +663,25 @@ export function CopilotChat({
         <h1>Copilot</h1>
         <button
           type="button"
-          className="chat-screen__clear"
-          onClick={() => {
-            setConversation(clearConversation())
-            setDrafts([])
-            setStatus(null)
-          }}
+          className={`chat-screen__clear${clearArmed ? ' is-armed' : ''}`}
+          onClick={onClear}
+          aria-label={clearArmed ? '再次点击确认清空对话' : '清空对话'}
+          title={clearArmed ? '再次点击确认清空' : '清空对话'}
         >
-          Clear
+          {clearArmed ? '确认清空' : 'Clear'}
         </button>
       </header>
 
-      <div className="chat-screen__body">
+      <div
+        className="chat-screen__body"
+        ref={bodyRef}
+        onScroll={onBodyScroll}
+        aria-live="polite"
+      >
         {isEmpty ? (
           <div className="chat-empty">
             <div className="chat-empty__help">
-              <h2>I can help you with:</h2>
+              <h2>我可以帮你</h2>
               <ol>
                 {HELP_ITEMS.map((item, index) => (
                   <li key={item}>
@@ -295,40 +693,141 @@ export function CopilotChat({
                 ))}
               </ol>
             </div>
-            <p className="chat-empty__hint">Type a question or hold the mic to start.</p>
+            <p className="chat-empty__hint">输入问题，或按住麦克风开始。Enter 发送，Shift+Enter 换行。</p>
           </div>
         ) : (
           <div className="chat__thread">
-            {messages.map((m) => (
-              <article
-                key={m.id}
-                className={`chat-bubble chat-bubble--${m.role === 'user' ? 'user' : 'assistant'}`}
-              >
-                {m.role !== 'user' ? (
-                  <AgentLabel name={m.agent_name} chain={m.agent_chain} />
-                ) : null}
-                <p>{m.content}</p>
-                {m.role !== 'user' ? (
-                  <div className="chat-bubble__meta">
-                    <span className="confidence">置信度 {(m.confidence * 100).toFixed(0)}%</span>
-                    <SourceChips sources={m.sources} />
-                    {accountKey && onOpenAccount ? (
-                      <button
-                        type="button"
-                        className="linkish"
-                        onClick={() => onOpenAccount(accountKey)}
+            {messages.map((m, index) => {
+              const isUser = m.role === 'user'
+              const showTime = shouldShowTimestamp(messages, index)
+              const steps = !isUser ? footprintSteps(m) : []
+              const pending = m.deliveryStatus === 'pending'
+              const stopped = m.deliveryStatus === 'stopped'
+              const errored = m.deliveryStatus === 'error'
+              const showDataSources = !isUser && !pending && !errored && m.sources?.length > 0
+              const showConfidence = !isUser && !pending && hasExplainableConfidence(m)
+              const originLabel = messageOriginLabel(m)
+              const timeLabel = pending
+                ? '正在回复'
+                : isUser
+                  ? formatMessageTime(m.createdAt)
+                  : stopped
+                    ? `已停止 · ${formatMessageTime(m.completedAt || m.createdAt)}`
+                    : formatMessageTime(m.completedAt || m.createdAt)
+              const showTimeRow = showTime || pending
+
+              return (
+                <div
+                  key={m.id}
+                  className={`chat-row chat-row--${isUser ? 'user' : 'assistant'}`}
+                >
+                  {!isUser ? (
+                    <div className="chat-row__identity">
+                      <span className="chat-row__bot-name">{BOT_NAME}</span>
+                      {pending ? (
+                        <span className="chat-row__live" aria-live="polite">
+                          正在回复
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  <article
+                    className={[
+                      'chat-bubble',
+                      `chat-bubble--${isUser ? 'user' : 'assistant'}`,
+                      pending ? 'is-pending' : '',
+                      stopped ? 'is-stopped' : '',
+                      errored ? 'is-error' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                  >
+                    {pending ? (
+                      <div className="chat-progress" role="status">
+                        <span className="chat-progress__dot" aria-hidden />
+                        <span>{m.progressLabel || '正在处理'}</span>
+                      </div>
+                    ) : null}
+
+                    {m.content ? (
+                      <p className={`chat-bubble__text${errored ? ' is-error-text' : ''}`}>{m.content}</p>
+                    ) : null}
+
+                    {stopped ? (
+                      <p className="chat-bubble__stopped" role="status">
+                        已停止生成
+                      </p>
+                    ) : null}
+
+                    {errored ? (
+                      <div className="chat-bubble__error-actions">
+                        <span className="chat-bubble__error-kind">{failureLabel(m.failureKind)}</span>
+                        <button
+                          type="button"
+                          className="chat-bubble__retry"
+                          onClick={() => retryMessage(m)}
+                          disabled={busy || generating || !m.retryUtterance}
+                        >
+                          重试
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {!isUser && !pending && steps.length > 0 ? (
+                      <details className="chat-steps">
+                        <summary>执行步骤</summary>
+                        <ol>
+                          {steps.map((step) => (
+                            <li key={step}>{step}</li>
+                          ))}
+                        </ol>
+                      </details>
+                    ) : null}
+
+                    {showConfidence ||
+                    (accountKey && onOpenAccount && !isUser && !pending && !errored) ? (
+                      <div className="chat-bubble__meta">
+                        {showConfidence ? (
+                          <span
+                            className="confidence"
+                            title="来自业务数据源的提取置信，不等于事实准确率"
+                          >
+                            提取置信 {(m.confidence * 100).toFixed(0)}%
+                          </span>
+                        ) : null}
+                        {accountKey && onOpenAccount && !pending && !errored ? (
+                          <button
+                            type="button"
+                            className="linkish"
+                            onClick={() => onOpenAccount(accountKey)}
+                          >
+                            查看客户画像 →
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </article>
+
+                  <div className="chat-row__footer">
+                    <p className="chat-row__origin" aria-label={`来源 ${originLabel}`}>
+                      来源：{originLabel}
+                    </p>
+                    {showDataSources ? <SourceChips sources={m.sources} /> : null}
+                    {showTimeRow ? (
+                      <time
+                        className="chat-row__time"
+                        dateTime={isUser ? m.createdAt : m.completedAt || m.createdAt}
                       >
-                        查看客户画像 →
-                      </button>
+                        {timeLabel}
+                      </time>
                     ) : null}
                   </div>
-                ) : null}
-              </article>
-            ))}
+                </div>
+              )
+            })}
           </div>
         )}
-
-        {status ? <p className="capture__status">{status}</p> : null}
 
         {drafts.length > 0 ? (
           <div className="draft-list">
@@ -344,7 +843,7 @@ export function CopilotChat({
               <DraftCard
                 key={d.idempotencyKey}
                 draft={d}
-                busy={busy}
+                busy={busy || generating}
                 onChange={updateDraft}
                 onConfirm={(draft) => {
                   void handleConfirm(draft)
@@ -361,6 +860,12 @@ export function CopilotChat({
         ) : null}
       </div>
 
+      {showNewMsgHint ? (
+        <button type="button" className="chat-newmsg" onClick={scrollToLatest}>
+          有新消息
+        </button>
+      ) : null}
+
       <div className="chat-dock">
         {isEmpty ? (
           <div className="chat-dock__chips">
@@ -369,7 +874,7 @@ export function CopilotChat({
                 key={chip.label}
                 type="button"
                 className="chat-dock__chip"
-                disabled={busy}
+                disabled={busy || generating}
                 onClick={() => onChip(chip)}
               >
                 {chip.label}
@@ -415,6 +920,7 @@ export function CopilotChat({
           className="chat-dock__composer"
           onSubmit={(e) => {
             e.preventDefault()
+            if (busy || generating) return
             void send(input)
           }}
         >
@@ -422,40 +928,40 @@ export function CopilotChat({
             type="button"
             className={`chat-dock__attach${attachments.length ? ' is-active' : ''}`}
             aria-label="添加附件"
-            disabled={busy || attachments.length >= ATTACH_MAX_COUNT}
+            disabled={busy || generating || attachments.length >= ATTACH_MAX_COUNT}
             onClick={() => fileInputRef.current?.click()}
           >
             <IconPaperclip />
           </button>
-          <input
+          <textarea
             ref={inputRef}
             value={input}
-            placeholder="Ask Copilot..."
-            disabled={busy}
+            placeholder={generating ? '正在生成回复…' : 'Ask Copilot...'}
+            rows={1}
             inputMode="text"
             enterKeyHint="send"
             autoComplete="off"
             autoCorrect="on"
             autoCapitalize="sentences"
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                void send(input)
-              }
-            }}
-            aria-label="Ask Copilot"
+            onKeyDown={onComposerKeyDown}
+            aria-label="Ask Copilot，Enter 发送，Shift+Enter 换行"
           />
           <button
             type="button"
             className={`chat-dock__mic${speech.listening ? ' is-listening' : ''}`}
             aria-label={speech.listening ? '松开结束语音' : '按住说话'}
-            disabled={busy}
+            disabled={busy || generating}
             onPointerDown={(e) => {
               e.preventDefault()
+              if (busy || generating) return
               speech.start('zh-CN')
             }}
             onPointerUp={() => {
+              if (busy || generating) {
+                speech.stop()
+                return
+              }
               const text = speech.stop()
               if (text) void send(text)
             }}
@@ -465,14 +971,27 @@ export function CopilotChat({
           >
             <IconMic />
           </button>
-          <button
-            type="submit"
-            className={`chat-dock__send${canSend ? ' is-ready' : ''}`}
-            aria-label="发送"
-            disabled={!canSend}
-          >
-            <IconSendUp />
-          </button>
+          {generating ? (
+            <button
+              type="button"
+              className="chat-dock__send is-stop"
+              aria-label="停止生成"
+              title="停止生成"
+              onClick={stopGeneration}
+            >
+              <IconStop />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className={`chat-dock__send${canSend ? ' is-ready' : ''}`}
+              aria-label="发送"
+              title="发送"
+              disabled={!canSend}
+            >
+              <IconSendUp />
+            </button>
+          )}
         </form>
       </div>
     </section>

@@ -11,6 +11,7 @@
 import type { DomainAgent } from './agentTypes.js'
 import * as tools from '../tools/dataverseTools.js'
 import { chatJson, hasDeepSeek } from '../llm/deepseek.js'
+import { WORK_SUMMARY_SYSTEM } from './prompts.js'
 
 export const workSummaryAgent: DomainAgent = {
   name: 'WorkSummary',
@@ -58,13 +59,14 @@ export const workSummaryAgent: DomainAgent = {
     if (hasDeepSeek()) {
       try {
         const { data, mode: m } = await chatJson<{ summary: string; confidence?: number }>({
-          system: `你是销售工作总结 Agent。根据活动草稿写简洁中文日报/周报素材（3～6 行），不要编造未给出的事实。只输出 JSON：{"summary":"...","confidence":0-1}`,
+          system: WORK_SUMMARY_SYSTEM,
           user: JSON.stringify({
             request: ctx.utterance,
             style: ctx.utterance.includes('周报') ? 'weekly' : 'daily',
             activities: facts,
+            instruction: '按本次请求口吻撰写，避免每次同一段套话。',
           }),
-          temperature: 0.3,
+          temperature: 0.4,
         })
         if (data.summary?.trim()) {
           content = data.summary.trim()
@@ -109,17 +111,24 @@ function heuristicSummary(
   list: Array<{
     accountName: string
     contactName: string
+    subject?: string
+    summary?: string
     syncStatus: string
     confidence: number
   }>,
 ) {
-  const lines = list.map(
-    (d, i) =>
-      `${i + 1}. ${d.accountName} · ${d.contactName} · ${d.syncStatus}（信心 ${(d.confidence * 100).toFixed(0)}%）`,
-  )
+  const weekly = /周报/.test(utterance)
+  const title = weekly
+    ? `本周工作小结（基于 ${list.length} 条活动草稿）`
+    : `今日工作小结（基于 ${list.length} 条活动草稿）`
+  const lines = list.map((d, i) => {
+    const focus = d.summary?.trim() || d.subject || `${d.accountName} · ${d.contactName}`
+    const low = d.confidence < 0.7 ? '（待确认）' : ''
+    return `${i + 1}. ${d.accountName} / ${d.contactName}：${focus}${low} · ${d.syncStatus}`
+  })
   return [
-    `工作总结（基于 ${list.length} 条活动草稿）：`,
+    title,
     ...lines,
-    utterance.includes('周报') ? '以上可作周报素材，Confirm 前请人工润色。' : '以上可作日报素材。',
+    weekly ? '以上可作周报素材，提交前请人工核对数字与客户名。' : '以上可作日报素材，Confirm 前请人工润色。',
   ].join('\n')
 }

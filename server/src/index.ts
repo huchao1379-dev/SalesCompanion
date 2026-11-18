@@ -10,6 +10,7 @@ app.use('/api', apiRouter)
 
 app.listen(config.port, config.host, () => {
   console.log(`[SalesCompanion API] http://${config.host}:${config.port}`)
+  console.log(`  AI provider: ${config.aiProvider}`)
   console.log(`  DeepSeek: ${hasDeepSeek() ? 'ON (' + config.deepseekModel + ')' : 'OFF → heuristic fallback'}`)
   console.log(
     `  Dataverse: ${hasRemoteDataverse() ? 'remote Web API' : 'in-memory seed (dataverse/seed/seed.json)'}`,

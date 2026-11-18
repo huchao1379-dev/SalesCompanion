@@ -100,7 +100,7 @@ export type OrchestratorResponse = {
   context: Record<string, string>
   latencyMs: number
   intent?: string
-  mode?: 'deepseek' | 'heuristic'
+  mode?: 'deepseek' | 'heuristic' | 'copilotstudio'
 }
 
 export type AccountRecord = {

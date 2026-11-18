@@ -6,7 +6,9 @@ import { powerApps } from '@microsoft/power-apps-vite/plugin'
 export default defineConfig({
   plugins: [react(), powerApps()],
   server: {
-    host: '127.0.0.1',
+    // Listen on all local interfaces so both 127.0.0.1 and localhost work.
+    // Power Apps Local Play requires hostname `localhost` (127.0.0.1 → InvalidOrigin).
+    host: true,
     port: 5174,
     strictPort: true,
     proxy: {

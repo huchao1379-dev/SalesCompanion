@@ -51,3 +51,31 @@ export function appendMessages(
     context: { ...state.context, ...context },
   })
 }
+
+export function updateMessage(
+  state: ConversationState,
+  messageId: string,
+  patch: Partial<AgentMessage>,
+): ConversationState {
+  return saveConversation({
+    ...state,
+    messages: state.messages.map((m) => (m.id === messageId ? { ...m, ...patch } : m)),
+  })
+}
+
+export function replaceMessage(
+  state: ConversationState,
+  messageId: string,
+  nextMessages: AgentMessage[],
+  context?: Record<string, string>,
+): ConversationState {
+  const idx = state.messages.findIndex((m) => m.id === messageId)
+  if (idx < 0) {
+    return appendMessages(state, nextMessages, context)
+  }
+  return saveConversation({
+    ...state,
+    messages: [...state.messages.slice(0, idx), ...nextMessages, ...state.messages.slice(idx + 1)],
+    context: { ...state.context, ...context },
+  })
+}

@@ -24,17 +24,19 @@ export const accountProfileAgent: DomainAgent = {
         // Visit pipeline can continue without a seed hit (user edits later).
         return {}
       }
+      const hint = ctx.utterance.trim().slice(0, 24)
       return {
         messages: [
           {
             id: `msg_${Math.random().toString(36).slice(2, 10)}`,
             role: 'assistant',
-            agent_name: 'Orchestrator',
-            content:
-              '未匹配到客户种子。可试「仁济医院最近怎么样？」或「Hospital Alpha 最新进度？」',
+            agent_name: '客户画像 Agent',
+            content: hint
+              ? `没在种子库里匹配到与「${hint}${ctx.utterance.trim().length > 24 ? '…' : ''}」对应的客户。可以改用完整医院名再试，例如「仁济医院最近怎么样？」或「Hospital Alpha 最新进度？」。`
+              : '未匹配到客户种子。可试「仁济医院最近怎么样？」或「Hospital Alpha 最新进度？」',
             sources: [],
             confidence: 0.45,
-            agent_chain: ['Orchestrator', '客户画像 Agent'],
+            agent_chain: ['客户画像 Agent'],
             createdAt: new Date().toISOString(),
           },
         ],
