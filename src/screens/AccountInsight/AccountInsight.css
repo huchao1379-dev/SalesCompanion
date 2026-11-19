@@ -728,3 +728,11 @@
   color: var(--text);
   border: 1px solid var(--line-strong);
 }
+
+.account-profile__contact-item {
+  width: 100%;
+}
+
+.account-profile__contact-item .contact-card {
+  flex: 1;
+}

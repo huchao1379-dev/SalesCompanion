@@ -109,11 +109,13 @@ function toAgentMessages(activities: CopilotResponseActivity[]): AgentMessage[] 
   return responseActivities(activities).map((activity, index) => ({
     id: `copilot_${activity.id || `${Date.now()}_${index}`}`,
     role: 'assistant',
+    agent_id: 'CopilotStudio',
     agent_name: activity.from?.name?.trim() || 'SalesAssistant',
     content: activityText(activity),
     sources: [],
-    confidence: 0,
-    agent_chain: ['SalesAssistant'],
+    confidence: 0.7,
+    confidence_kind: 'answer',
+    agent_chain: ['CopilotStudio'],
     createdAt:
       activity.timestamp instanceof Date
         ? activity.timestamp.toISOString()

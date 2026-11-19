@@ -4,7 +4,7 @@ export const SYNC_STATUS_LABEL: Record<SyncStatus, string> = {
   Draft: 'AI 草稿',
   Confirmed: '已确认',
   Syncing: '同步中',
-  Synced: '已同步 SAP',
+  Synced: '已同步（模拟）',
   SyncFailed: '同步失败',
   Discarded: '已丢弃',
 }

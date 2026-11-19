@@ -18,7 +18,9 @@ import {
   orderLogisticsToolResultSchema,
   orderQueryTools,
 } from '../tools/readOnlyAgentTools.js'
-import { ORDER_QUERY_SYSTEM } from './prompts.js'
+import { ORDER_QUERY_SYSTEM, ORDER_QUERY_TOOL_ADDENDUM } from './prompts.js'
+import { resolveAccount } from './accountProfile.js'
+import { nowIsoInZone } from '../util/datetime.js'
 
 type OrderFact = {
   id: string
@@ -151,10 +153,12 @@ function messageFromFacts(utterance: string, facts: OrderFacts): AgentMessage {
   return {
     id: `msg_${Math.random().toString(36).slice(2, 10)}`,
     role: 'assistant',
+    agent_id: 'OrderQuery',
     agent_name: '订单查询 Agent',
     content,
     sources,
     confidence: latest ? 0.88 : 0.7,
+    confidence_kind: 'answer',
     agent_chain: ['Orchestrator', '订单查询 Agent'],
     createdAt: new Date().toISOString(),
     ui,
@@ -167,7 +171,11 @@ async function resolveOrderFacts(
   knownAccountName?: string,
 ) {
   const knownAccount = knownAccountId ? await getAccount(knownAccountId) : undefined
-  const result = await getOrderLogistics(knownAccount?.name || knownAccountName || utterance)
+  const resolved =
+    knownAccount ||
+    (await resolveAccount(utterance)) ||
+    (knownAccountName ? await resolveAccount(knownAccountName) : undefined)
+  const result = await getOrderLogistics(resolved?.name || knownAccountName || utterance)
   if (!result) return undefined
   return {
     account: {
@@ -194,12 +202,21 @@ export async function queryOrderLogistics(
       fallback = {
         id: `msg_${Math.random().toString(36).slice(2, 10)}`,
         role: 'assistant',
+        agent_id: 'OrderQuery',
         agent_name: '订单查询 Agent',
         content: '未识别到客户。请说明医院名称，例如「查一下仁济医院上个订单的物流」。',
         sources: [],
         confidence: 0.4,
+        confidence_kind: 'answer',
         agent_chain: ['Orchestrator', '订单查询 Agent'],
         createdAt: new Date().toISOString(),
+        ui: {
+          type: 'clarify',
+          title: '需要客户名称',
+          question: '是哪家客户的订单？',
+          examples: ['查一下仁济医院上个订单的物流', 'Hospital Alpha 发货到哪了'],
+          tone: 'info',
+        },
       }
     } else {
       fallback = messageFromFacts(utterance, facts)
@@ -208,10 +225,12 @@ export async function queryOrderLogistics(
     fallback = {
       id: `msg_${Math.random().toString(36).slice(2, 10)}`,
       role: 'assistant',
+      agent_id: 'OrderQuery',
       agent_name: '订单查询 Agent',
       content: '暂时无法读取订单数据，请稍后再试。',
       sources: [],
       confidence: 0.3,
+      confidence_kind: 'answer',
       agent_chain: ['Orchestrator', '订单查询 Agent'],
       createdAt: new Date().toISOString(),
     }
@@ -222,14 +241,17 @@ export async function queryOrderLogistics(
 
   try {
     const { finalText, toolResults } = await chatWithTools({
-      system: `${ORDER_QUERY_SYSTEM}\n\n必须调用 get_order_logistics 查询事实，再作答。有 knownAccountName 时将其作为工具 query；否则从用户问题中提取客户名。只输出 JSON：{"answer":"...","confidence":0到1,"focus":"status|eta|amount|missing"}。不得补充工具结果之外的状态、日期、金额或运单信息。`,
+      system: `${ORDER_QUERY_SYSTEM}\n\n${ORDER_QUERY_TOOL_ADDENDUM}`,
       user: JSON.stringify({
         question: utterance,
         knownAccountId: knownAccountId ?? null,
         knownAccountName: knownAccountName ?? null,
+        now: nowIsoInZone(),
+        timezone: 'Asia/Shanghai',
       }),
       tools: orderQueryTools,
       temperature: 0.2,
+      maxTokens: 420,
       maxToolRounds: 3,
     })
     const rawFacts = toolResults.find((item) => item.name === 'get_order_logistics')?.result

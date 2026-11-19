@@ -25,6 +25,11 @@ export type MetricsSnapshot = {
   seedOpportunityCount: number
 }
 
+export type DraftSnapshot = {
+  activities: ActivityDraft[]
+  opportunityDrafts: OpportunityDraft[]
+}
+
 /** Async persistence boundary shared by the seed adapter and future Dataverse Web API adapter. */
 export interface SalesRepository {
   readonly mode: 'seed-memory' | 'dataverse-webapi'
@@ -52,4 +57,7 @@ export interface SalesRepository {
   getConversation(sessionKey: string): Promise<ConversationRecord | undefined>
   computeMetrics(): Promise<MetricsSnapshot>
   reloadSeed(): Promise<number>
+  /** In-memory transaction helpers; a Dataverse adapter can implement these too. */
+  snapshotDrafts?(): DraftSnapshot
+  restoreDrafts?(snapshot: DraftSnapshot): void
 }

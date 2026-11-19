@@ -5,9 +5,9 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: path.resolve(__dirname, '../.env') })
 
-const aiProvider = process.env.AI_PROVIDER?.trim().toLowerCase() === 'deepseek'
-  ? 'deepseek'
-  : 'copilotstudio'
+const aiProvider = process.env.AI_PROVIDER?.trim().toLowerCase() === 'copilotstudio'
+  ? 'copilotstudio'
+  : 'deepseek'
 
 export const config = {
   port: Number(process.env.PORT || 8787),
@@ -24,7 +24,7 @@ export const config = {
   copilotStudioClientSecret: process.env.COPILOTSTUDIO_CLIENT_SECRET?.trim() || '',
   dataverseUrl: process.env.DATAVERSE_URL?.trim() || '',
   dataverseToken: process.env.DATAVERSE_TOKEN?.trim() || '',
-  promptVersion: process.env.PROMPT_VERSION || 'demo-deepseek-v1',
+  promptVersion: process.env.PROMPT_VERSION || 'demo-deepseek-v2',
   seedPath:
     process.env.SEED_PATH ||
     path.resolve(__dirname, '../../dataverse/seed/seed.json'),

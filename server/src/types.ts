@@ -14,6 +14,31 @@ export type SourceRef = {
   id?: string
 }
 
+export type ConfidenceKind = 'answer' | 'extraction' | 'composite'
+
+export type ReviewSeverity = 'info' | 'warn' | 'block'
+
+export type ReviewAction = 'create' | 'link_existing' | 'update_stage' | 'edit'
+
+export type ReviewFinding = {
+  code: string
+  severity: ReviewSeverity
+  field?: string
+  message: string
+  suggestedAction?: ReviewAction
+}
+
+export type AgentStepStatus = 'ok' | 'fallback' | 'error' | 'skipped'
+
+export type AgentStep = {
+  agentId: string
+  agentName: string
+  status: AgentStepStatus
+  latencyMs: number
+  summary?: string
+  errorCode?: string
+}
+
 export type ActivityDraft = {
   kind: 'activity'
   id: string
@@ -25,6 +50,7 @@ export type ActivityDraft = {
   accountId?: string
   contactName: string
   contactId?: string
+  occurredAt?: string
   scheduledStart?: string
   scheduledEnd?: string
   followUpAt: string
@@ -38,6 +64,9 @@ export type ActivityDraft = {
   syncError?: string
   sessionKey?: string
   promptVersion?: string
+  reviewStatus?: 'passed' | 'warn' | 'blocked'
+  reviewFindings?: ReviewFinding[]
+  pipelineStatus?: 'ok' | 'partial'
   createdAt: string
   updatedAt: string
 }
@@ -70,6 +99,12 @@ export type OpportunityDraft = {
   syncError?: string
   isSeed?: boolean
   sessionKey?: string
+  reviewStatus?: 'passed' | 'warn' | 'blocked'
+  reviewFindings?: ReviewFinding[]
+  recommendedAction?: ReviewAction
+  confirmedAction?: 'create' | 'link_existing'
+  linkedExistingOpportunityId?: string
+  pipelineStatus?: 'ok' | 'partial'
   createdAt: string
   updatedAt: string
 }
@@ -100,7 +135,15 @@ export type MessageUiAction = {
 
 /** Structured blocks for rich chat rendering (not raw JSON dump). */
 export type MessageUiBlock = {
-  type: 'account_pulse' | 'opportunity_list' | 'order_status' | 'metric_strip'
+  type:
+    | 'account_pulse'
+    | 'opportunity_list'
+    | 'order_status'
+    | 'metric_strip'
+    | 'clarify'
+    | 'work_summary'
+    | 'capture_result'
+    | 'review'
   title?: string
   metrics?: MessageUiMetric[]
   items?: MessageUiItem[]
@@ -112,26 +155,46 @@ export type MessageUiBlock = {
   footnote?: string
   /** Explicit AI suggestion — never mix into confirmed facts. */
   hint?: string
+  /** Unverified memo/notes — rendered separately from facts. */
+  unverifiedNotes?: string
+  /** Clarify card: one focused question plus tappable examples. */
+  question?: string
+  examples?: string[]
+  /** Work summary / capture result structured sections. */
+  sections?: Array<{
+    heading?: string
+    bullets: Array<{ text: string; activityId?: string; status?: string }>
+  }>
+  /** Capture result facts grid. */
+  facts?: Array<{ label: string; value: string; tone?: MessageUiMetricTone }>
+  /** Supervisor findings (non-blocking unless severity=block). */
+  findings?: ReviewFinding[]
+  tone?: 'info' | 'warn' | 'success'
 }
 
 export type AgentMessage = {
   id: string
   role: 'user' | 'assistant' | 'system' | 'tool'
+  agent_id?: string
   agent_name: string
   content: string
   sources: SourceRef[]
   confidence: number
+  confidence_kind?: ConfidenceKind
   draft?: DraftPayload
   agent_chain?: string[]
   createdAt: string
   /** Optional rich UI payload rendered by the chat client. */
   ui?: MessageUiBlock
+  steps?: AgentStep[]
 }
 
 export type OrchestratorRequest = {
   utterance: string
   locale?: string
   context?: Record<string, string>
+  /** Stable per user turn; retries reuse it so drafts stay idempotent. */
+  turnId?: string
 }
 
 export type OrchestratorResponse = {
@@ -140,7 +203,9 @@ export type OrchestratorResponse = {
   context: Record<string, string>
   latencyMs: number
   intent?: string
-  mode?: 'deepseek' | 'heuristic' | 'copilotstudio'
+  mode?: 'deepseek' | 'heuristic' | 'mixed' | 'copilotstudio'
+  degraded_reason?: string
+  steps?: AgentStep[]
 }
 
 export type AccountRecord = {
@@ -222,6 +287,8 @@ export type InvocationLog = {
   success: boolean
   confidence?: number
   errorMessage?: string
+  errorCode?: string
+  fallbackReason?: string
   promptVersion?: string
   modelName?: string
   createdAt: string
@@ -237,13 +304,19 @@ export type ConversationRecord = {
 
 export type ExtractedVisit = {
   accountName?: string
+  accountId?: string
   contactName?: string
   productLine?: string
   productModel?: string
   quantity?: number
+  unit?: string
+  occurredAt?: string
+  followUpAt?: string
   followUpHint?: string
   visitType?: string
   summary?: string
+  fieldConfidence?: Record<string, number>
+  missingFields?: string[]
   confidence: number
 }
 

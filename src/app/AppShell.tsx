@@ -36,7 +36,7 @@ export function AppShell() {
   const [seedDrafts, setSeedDrafts] = useState<DraftPayload[]>([])
   const [accountKey, setAccountKey] = useState<string>('SAP-ACC-RENJI')
   const [opportunityId, setOpportunityId] = useState<string | null>(null)
-  const [insightsOpen, setInsightsOpen] = useState(false)
+  const [insightsOpen, setInsightsOpen] = useState(true)
   const [copilotDraft, setCopilotDraft] = useState('')
   const [chatSeed, setChatSeed] = useState('')
   const [chatKey, setChatKey] = useState(0)
@@ -69,6 +69,12 @@ export function AppShell() {
     goScreen('chat')
   }
 
+  function openBrief() {
+    unlockSpeech()
+    goScreen('home')
+    setInsightsOpen(true)
+  }
+
   const onBoard = screen === 'home'
   const showDock =
     !(onBoard && insightsOpen) && screen !== 'chat' && screen !== 'opportunity-detail'
@@ -99,11 +105,7 @@ export function AppShell() {
       {onBoard ? (
         <HomeDashboard
           dimmed={insightsOpen}
-          onOpenBrief={() => {
-            // Unlock inside the tap so autoplay on open is allowed by the browser.
-            unlockSpeech()
-            setInsightsOpen(true)
-          }}
+          onOpenBrief={openBrief}
           onOpenCapture={() => goScreen('capture')}
           onOpenChat={() => openChat()}
           onOpenTasks={() => goScreen('tasks')}
@@ -228,11 +230,7 @@ export function AppShell() {
           onDraftChange={setCopilotDraft}
           onOpenCapture={() => goScreen('capture')}
           onOpenOpportunity={() => goScreen('opportunity')}
-          onOpenBrief={() => {
-            unlockSpeech()
-            goScreen('home')
-            setInsightsOpen(true)
-          }}
+          onOpenBrief={openBrief}
           onOpenChat={openChat}
         />
       ) : null}

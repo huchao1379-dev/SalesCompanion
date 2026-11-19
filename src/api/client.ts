@@ -1,3 +1,5 @@
+import type { DraftPayload } from '../agents/types'
+
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') || '/api'
 
 function isPowerPlatformHost() {
@@ -87,6 +89,7 @@ export const api = {
       utterance: string
       locale?: string
       context?: Record<string, string>
+      turnId?: string
     },
     init?: { signal?: AbortSignal },
   ) =>
@@ -109,7 +112,7 @@ export const api = {
       signal: init?.signal,
     }),
   listDrafts: () => request<{ drafts: unknown[] }>('/drafts'),
-  upsertDraft: (draft: { idempotencyKey: string }) =>
+  upsertDraft: (draft: DraftPayload) =>
     request(`/drafts/${encodeURIComponent(draft.idempotencyKey)}`, {
       method: 'PUT',
       body: JSON.stringify(draft),

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { config } from '../config.js'
-import type { SalesRepository } from './repository.js'
+import type { DraftSnapshot, SalesRepository } from './repository.js'
+import { isoDateInZone, todayIsoDate } from '../util/datetime.js'
 import type {
   AccountRecord,
   ActivityDraft,
@@ -156,7 +157,15 @@ export class SeedMemoryRepository implements SalesRepository {
 
   async upsertActivity(draft: ActivityDraft): Promise<ActivityDraft> {
     const idx = this.activities.findIndex((d) => d.idempotencyKey === draft.idempotencyKey)
-    const next = { ...draft, updatedAt: now() }
+    const next = idx >= 0
+      ? {
+          ...this.activities[idx],
+          ...draft,
+          id: this.activities[idx].id,
+          createdAt: this.activities[idx].createdAt,
+          updatedAt: now(),
+        }
+      : { ...draft, updatedAt: now() }
     if (idx >= 0) this.activities[idx] = next
     else this.activities.unshift(next)
     return next
@@ -164,10 +173,30 @@ export class SeedMemoryRepository implements SalesRepository {
 
   async upsertOpportunityDraft(draft: OpportunityDraft): Promise<OpportunityDraft> {
     const idx = this.opportunityDrafts.findIndex((d) => d.idempotencyKey === draft.idempotencyKey)
-    const next = { ...draft, updatedAt: now() }
+    const next = idx >= 0
+      ? {
+          ...this.opportunityDrafts[idx],
+          ...draft,
+          id: this.opportunityDrafts[idx].id,
+          createdAt: this.opportunityDrafts[idx].createdAt,
+          updatedAt: now(),
+        }
+      : { ...draft, updatedAt: now() }
     if (idx >= 0) this.opportunityDrafts[idx] = next
     else this.opportunityDrafts.unshift(next)
     return next
+  }
+
+  snapshotDrafts(): DraftSnapshot {
+    return {
+      activities: [...this.activities],
+      opportunityDrafts: [...this.opportunityDrafts],
+    }
+  }
+
+  restoreDrafts(snapshot: DraftSnapshot): void {
+    this.activities = [...snapshot.activities]
+    this.opportunityDrafts = [...snapshot.opportunityDrafts]
   }
 
   getDraftByKey(idempotencyKey: string): ActivityDraft | OpportunityDraft | undefined {
@@ -183,6 +212,9 @@ export class SeedMemoryRepository implements SalesRepository {
     patch?: {
       syncError?: string
       sapExternalId?: string
+      confirmedAction?: 'create' | 'link_existing'
+      linkedExistingOpportunityId?: string
+      reviewStatus?: 'passed' | 'warn' | 'blocked'
     },
   ): ActivityDraft | OpportunityDraft | null {
     const actIdx = this.activities.findIndex((d) => d.idempotencyKey === idempotencyKey)
@@ -194,6 +226,7 @@ export class SeedMemoryRepository implements SalesRepository {
         updatedAt: now(),
         syncError: patch && 'syncError' in patch ? patch.syncError : current.syncError,
         sapExternalId: patch?.sapExternalId ?? current.sapExternalId,
+        reviewStatus: patch?.reviewStatus ?? current.reviewStatus,
       }
       this.activities[actIdx] = next
       return next
@@ -207,6 +240,10 @@ export class SeedMemoryRepository implements SalesRepository {
         updatedAt: now(),
         syncError: patch && 'syncError' in patch ? patch.syncError : current.syncError,
         sapExternalId: patch?.sapExternalId ?? current.sapExternalId,
+        confirmedAction: patch?.confirmedAction ?? current.confirmedAction,
+        linkedExistingOpportunityId:
+          patch?.linkedExistingOpportunityId ?? current.linkedExistingOpportunityId,
+        reviewStatus: patch?.reviewStatus ?? current.reviewStatus,
       }
       this.opportunityDrafts[oppIdx] = next
       return next
@@ -220,6 +257,9 @@ export class SeedMemoryRepository implements SalesRepository {
   ): Promise<ActivityDraft | OpportunityDraft | null> {
     const draft = this.getDraftByKey(idempotencyKey)
     if (!draft) throw new Error('Draft not found')
+    if (draft.syncStatus === 'Synced') return draft
+    if (draft.syncStatus === 'Discarded') throw new Error('Draft already discarded')
+
     this.updateDraftStatus(idempotencyKey, 'Confirmed', { syncError: undefined })
     this.updateDraftStatus(idempotencyKey, 'Syncing')
     await delay(700)
@@ -228,9 +268,87 @@ export class SeedMemoryRepository implements SalesRepository {
         syncError: 'SAP 校验失败（模拟）：请检查数量与客户信用后重试',
       })
     }
-    return this.updateDraftStatus(idempotencyKey, 'Synced', {
+
+    const linkedOpportunity =
+      draft.kind === 'opportunity' && draft.reuseExisting
+        ? this.findOpportunity(draft.existingOpportunityRef)
+        : undefined
+
+    const synced = this.updateDraftStatus(idempotencyKey, 'Synced', {
       sapExternalId: `SAP-${Date.now().toString(36).toUpperCase()}`,
       syncError: undefined,
+      confirmedAction: draft.kind === 'opportunity'
+        ? linkedOpportunity
+          ? 'link_existing'
+          : 'create'
+        : undefined,
+      linkedExistingOpportunityId: linkedOpportunity?.id,
+    })
+
+    if (synced?.kind === 'opportunity') {
+      if (linkedOpportunity) {
+        linkedOpportunity.linkedActivityId = synced.linkedActivityId || linkedOpportunity.linkedActivityId
+        linkedOpportunity.updatedAt = now()
+      } else {
+        this.createOpportunityRecord(synced)
+      }
+      return this.getDraftByKey(idempotencyKey) ?? synced
+    }
+    return synced
+  }
+
+  private findOpportunity(ref?: string): OpportunityRecord | undefined {
+    if (!ref) return undefined
+    return this.opportunities.find(
+      (opportunity) =>
+        opportunity.id === ref ||
+        opportunity.externalKey === ref ||
+        opportunity.name === ref,
+    )
+  }
+
+  private createOpportunityRecord(draft: OpportunityDraft) {
+    const existing = this.opportunities.find(
+      (opportunity) =>
+        opportunity.id === draft.id ||
+        (draft.sapExternalId && opportunity.externalKey === draft.sapExternalId),
+    )
+    if (existing) {
+      Object.assign(existing, {
+        quantity: draft.quantity,
+        amount: draft.estimatedValue,
+        stage: draft.stage,
+        confidenceScore: draft.confidence,
+        closeDate: draft.closeDate,
+        syncStatus: 'Synced',
+        updatedAt: now(),
+      })
+      return
+    }
+    this.opportunities.push({
+      id: draft.id,
+      externalKey: draft.sapExternalId || `OPP-${Date.now().toString(36).toUpperCase()}`,
+      name: draft.name,
+      accountId: draft.accountId || '',
+      accountName: draft.accountName,
+      productLine: draft.productLine,
+      productModel: draft.productModel,
+      quantity: draft.quantity,
+      amount: draft.estimatedValue,
+      currencyCode: draft.currency,
+      stage: draft.stage,
+      confidenceScore: draft.confidence,
+      closeDate: draft.closeDate,
+      syncStatus: 'Synced',
+      isSeed: false,
+      reuseExisting: false,
+      supervisorHints: draft.supervisorHints,
+      linkedActivityId: draft.linkedActivityId,
+      idempotencyKey: draft.idempotencyKey,
+      createdByAgent: draft.agentName,
+      sourcesJson: JSON.stringify(draft.sources),
+      createdAt: now(),
+      updatedAt: now(),
     })
   }
 
@@ -252,6 +370,8 @@ export class SeedMemoryRepository implements SalesRepository {
       success: row.success,
       confidence: row.confidence,
       errorMessage: row.errorMessage,
+      errorCode: row.errorCode,
+      fallbackReason: row.fallbackReason,
       promptVersion: row.promptVersion ?? config.promptVersion,
       modelName: row.modelName,
     }
@@ -304,7 +424,12 @@ export class SeedMemoryRepository implements SalesRepository {
         (o) => o.syncStatus !== 'Discarded' && (o.confidence < 0.7 || o.stage === 'Identify'),
       ),
     ].length
-    const todayVisits = this.activities.filter((a) => a.syncStatus !== 'Discarded').length
+    const todayVisits = this.activities.filter(
+      (activity) =>
+        activity.syncStatus !== 'Discarded' &&
+        isoDateInZone(activity.occurredAt || activity.scheduledStart || activity.createdAt) ===
+          todayIsoDate(),
+    ).length
     return {
       todayVisits,
       riskOpportunities,

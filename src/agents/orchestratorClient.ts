@@ -1,7 +1,7 @@
 import { ApiRequestError, api } from '../api/client'
 import type { OrchestratorRequest, OrchestratorResponse } from './types'
 
-let lastMode: 'deepseek' | 'heuristic' | 'copilotstudio' | 'offline-mock' = 'offline-mock'
+let lastMode: 'deepseek' | 'heuristic' | 'mixed' | 'copilotstudio' | 'offline-mock' = 'offline-mock'
 let apiReachable: boolean | null = null
 
 export async function pingOrchestrator(): Promise<boolean> {
@@ -32,7 +32,7 @@ export async function orchestrate(
 ): Promise<OrchestratorResponse> {
   try {
     const res = (await api.orchestrate(req, { signal: opts?.signal })) as OrchestratorResponse & {
-      mode?: 'deepseek' | 'heuristic' | 'copilotstudio'
+      mode?: 'deepseek' | 'heuristic' | 'mixed' | 'copilotstudio'
     }
     apiReachable = true
     lastMode = res.mode || 'heuristic'

@@ -38,8 +38,22 @@ export function listDrafts(): DraftPayload[] {
 export async function refreshDraftsFromApi(): Promise<DraftPayload[]> {
   try {
     const res = await api.listDrafts()
-    const drafts = res.drafts as DraftPayload[]
-    return mirror(drafts)
+    const serverDrafts = res.drafts as DraftPayload[]
+    const localDrafts = readLocal().drafts
+    const merged = [...serverDrafts]
+    for (const local of localDrafts) {
+      const index = merged.findIndex((draft) => draft.idempotencyKey === local.idempotencyKey)
+      if (index < 0) {
+        if (local.syncStatus === 'SyncFailed') merged.push(local)
+        continue
+      }
+      // A local confirm failure must stay visible even if the server still has
+      // the pre-confirm Draft row.
+      if (local.syncStatus === 'SyncFailed' && merged[index].syncStatus === 'Draft') {
+        merged[index] = local
+      }
+    }
+    return mirror(merged)
   } catch {
     return listDrafts()
   }
@@ -74,7 +88,7 @@ export function updateDraftStatus(
 
 export type ConfirmSyncResult = {
   draft: DraftPayload
-  /** true when API confirm succeeded; false when local mock fallback was used */
+  /** true when API confirm succeeded; false when the API was unreachable (draft stays SyncFailed) */
   viaApi: boolean
 }
 
@@ -93,6 +107,9 @@ export async function confirmAndSyncDetailed(
 ): Promise<ConfirmSyncResult> {
   upsertDraft({ ...draft, syncStatus: 'Confirmed', syncError: undefined })
   try {
+    // Flush the latest edits before confirm; otherwise the server may 404 on
+    // an idempotency key it never received.
+    await api.upsertDraft({ ...draft, syncStatus: 'Draft', syncError: undefined })
     const synced = (await api.confirmDraft(draft.idempotencyKey, options?.fail)) as DraftPayload
     const store = readLocal()
     const idx = store.drafts.findIndex((d) => d.idempotencyKey === synced.idempotencyKey)
@@ -101,22 +118,13 @@ export async function confirmAndSyncDetailed(
     writeLocal(store)
     return { draft: synced, viaApi: true }
   } catch {
-    // Local simulation fallback — clearly marked MOCK so UI never pretends API succeeded
-    updateDraftStatus(draft.idempotencyKey, 'Syncing')
-    await delay(900)
-    if (options?.fail) {
-      const failed =
-        updateDraftStatus(draft.idempotencyKey, 'SyncFailed', {
-          syncError: '【本地模拟】SAP 校验失败：请检查数量与客户信用后重试',
-        } as Partial<DraftPayload>) ?? draft
-      return { draft: failed, viaApi: false }
-    }
-    const synced =
-      updateDraftStatus(draft.idempotencyKey, 'Synced', {
-        sapExternalId: `MOCK-SAP-${Date.now().toString(36).toUpperCase()}`,
-        syncError: undefined,
-      } as Partial<DraftPayload>) ?? draft
-    return { draft: synced, viaApi: false }
+    // Never fake a SAP success. Keep the draft recoverable and surface the
+    // failure so the user can retry once the API is reachable.
+    const failed =
+      updateDraftStatus(draft.idempotencyKey, 'SyncFailed', {
+        syncError: '【本地】后端确认接口不可用，草稿未写入；请检查 API 后重试。',
+      } as Partial<DraftPayload>) ?? { ...draft, syncStatus: 'SyncFailed' as const }
+    return { draft: failed as DraftPayload, viaApi: false }
   }
 }
 
@@ -128,8 +136,4 @@ export async function discardDraft(draft: DraftPayload): Promise<DraftPayload> {
   } catch {
     return upsertDraft({ ...draft, syncStatus: 'Discarded' })
   }
-}
-
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }

@@ -40,6 +40,7 @@ async function handleOrchestrate(req: import('express').Request, res: import('ex
       utterance,
       locale: req.body?.locale,
       context: req.body?.context,
+      turnId: typeof req.body?.turnId === 'string' ? req.body.turnId.slice(0, 100) : undefined,
     }
     const result = useCopilotStudio
       ? await copilotStudioOrchestrate(payload)

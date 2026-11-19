@@ -1,11 +1,11 @@
 type SpeakOptions = {
   lang?: string
   rate?: number
+  onStart?: () => void
   onEnd?: () => void
   onError?: (error: SpeechSynthesisErrorEvent) => void
 }
 
-let unlockQueued = false
 let voicesReady: Promise<SpeechSynthesisVoice[]> | null = null
 
 function synth(): SpeechSynthesis | null {
@@ -16,35 +16,15 @@ function normalizeLang(lang: string) {
   return lang.replace('_', '-').toLowerCase()
 }
 
-/** Warm the engine inside a user gesture so Android Chrome allows later speak(). */
+/** Resume a paused speech engine; the actual utterance is started by the UI. */
 export function unlockSpeech() {
   const s = synth()
   if (!s) return
   void ensureVoices()
-  if (unlockQueued) {
-    try {
-      s.resume()
-    } catch {
-      // ignore
-    }
-    return
-  }
-  unlockQueued = true
   try {
-    const warm = new SpeechSynthesisUtterance(' ')
-    warm.volume = 0
-    warm.rate = 2
-    s.speak(warm)
-    // Defer cancel so the gesture still registers a speak() on Android Chrome.
-    window.setTimeout(() => {
-      try {
-        s.cancel()
-      } catch {
-        // ignore
-      }
-    }, 0)
+    s.resume()
   } catch {
-    unlockQueued = false
+    // ignore
   }
 }
 
@@ -90,16 +70,19 @@ export function pickVoice(
     voices.find((v) => normalizeLang(v.lang).startsWith(prefix))
   if (byPrefix) return byPrefix
 
-  return voices.find((v) => v.default) ?? voices[0] ?? null
+  // Do not bind Chinese text to an unrelated default (often English) voice;
+  // leave the utterance language set to zh-CN so the browser can choose safely.
+  return null
 }
 
 /**
- * Speak text with Android Chrome workarounds:
- * - wait for voices
- * - gap after cancel (Chromium drops the next utterance otherwise)
- * - resume() kick (engine often starts paused on Android)
+ * Speak text with browser workarounds:
+ * - speak synchronously inside the user gesture (never await voice discovery first);
+ * - use sync voices when available, but fall back to utter.lang;
+ * - resume() kick for Android Chrome;
+ * - watchdog so a blocked utterance cannot leave the UI stuck on "playing".
  */
-export async function speakText(text: string, options: SpeakOptions = {}): Promise<() => void> {
+export function speakText(text: string, options: SpeakOptions = {}): () => void {
   const s = synth()
   const trimmed = text.trim()
   if (!s || !trimmed) {
@@ -108,41 +91,77 @@ export async function speakText(text: string, options: SpeakOptions = {}): Promi
   }
 
   const lang = options.lang ?? 'zh-CN'
-  const voices = await ensureVoices()
+  // Do not await here: awaiting voices can outlive the browser's user-activation
+  // window and make speech silently fail.
+  const voices = s.getVoices()
   const voice = pickVoice(voices, lang)
 
-  s.cancel()
+  try {
+    s.cancel()
+  } catch {
+    // ignore
+  }
 
-  await new Promise<void>((resolve) => {
-    window.setTimeout(resolve, 60)
-  })
+  let utter: SpeechSynthesisUtterance
+  try {
+    utter = new SpeechSynthesisUtterance(trimmed)
+    utter.lang = voice?.lang || lang
+    utter.rate = options.rate ?? 1
+    if (voice) utter.voice = voice
+  } catch {
+    options.onError?.({ error: 'synthesis-failed' } as SpeechSynthesisErrorEvent)
+    return () => undefined
+  }
 
-  const utter = new SpeechSynthesisUtterance(trimmed)
-  utter.lang = voice?.lang || lang
-  utter.rate = options.rate ?? 1
-  if (voice) utter.voice = voice
-
+  let started = false
+  let finished = false
   let keepAlive: number | null = null
-  const clearKeepAlive = () => {
+  let watchdog: number | null = null
+
+  const clearTimers = () => {
     if (keepAlive != null) {
       window.clearInterval(keepAlive)
       keepAlive = null
     }
+    if (watchdog != null) {
+      window.clearTimeout(watchdog)
+      watchdog = null
+    }
+  }
+
+  const markStarted = () => {
+    if (started || finished) return
+    started = true
+    options.onStart?.()
+  }
+
+  utter.onstart = () => {
+    markStarted()
   }
 
   utter.onend = () => {
-    clearKeepAlive()
+    if (finished) return
+    finished = true
+    clearTimers()
     options.onEnd?.()
   }
 
   utter.onerror = (event) => {
-    clearKeepAlive()
-    // cancel/interrupted is expected when stopSpeak() runs
+    if (finished) return
+    finished = true
+    clearTimers()
+    // cancel/interrupted is expected when stopSpeak() runs or a new utterance starts.
     if (event.error === 'interrupted' || event.error === 'canceled') return
     options.onError?.(event)
   }
 
-  s.speak(utter)
+  try {
+    s.speak(utter)
+  } catch {
+    options.onError?.({ error: 'synthesis-failed' } as SpeechSynthesisErrorEvent)
+    return () => undefined
+  }
+
   // Android Chrome frequently queues in a paused state until resume().
   try {
     s.resume()
@@ -150,9 +169,21 @@ export async function speakText(text: string, options: SpeakOptions = {}): Promi
     // ignore
   }
 
+  // Some embedded browsers never dispatch `onstart` for blocked/unsupported
+  // speech. Do not leave the UI silently idle or permanently pending.
+  watchdog = window.setTimeout(() => {
+    if (started || finished) return
+    finished = true
+    clearTimers()
+    options.onError?.({ error: 'not-allowed' } as SpeechSynthesisErrorEvent)
+  }, 8000)
+
   keepAlive = window.setInterval(() => {
     if (!s.speaking) {
-      clearKeepAlive()
+      if (keepAlive != null) {
+        window.clearInterval(keepAlive)
+        keepAlive = null
+      }
       return
     }
     try {
@@ -162,9 +193,16 @@ export async function speakText(text: string, options: SpeakOptions = {}): Promi
     }
   }, 5000)
 
+  // Warm the voice list for the next page without blocking this utterance.
+  if (voices.length === 0) void ensureVoices()
+
   return () => {
-    clearKeepAlive()
-    s.cancel()
+    clearTimers()
+    try {
+      s.cancel()
+    } catch {
+      // ignore
+    }
   }
 }
 

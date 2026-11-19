@@ -88,11 +88,7 @@ function buildMonthGrid(now: Date, events: AgendaItem[]) {
 
 export function HomeDashboard({
   dimmed = false,
-  onOpenBrief: _onOpenBrief,
-  onOpenCapture: _onOpenCapture,
-  onOpenChat: _onOpenChat,
-  onOpenTasks: _onOpenTasks,
-  onOpenAccount: _onOpenAccount,
+  onOpenBrief,
   onOpenActivity,
 }: Props) {
   const { theme, toggleTheme } = useTheme()
@@ -123,10 +119,12 @@ export function HomeDashboard({
   const events = useMemo(() => buildMonthEvents(new Date(now)), [dayKey])
   const calendarCells = useMemo(() => buildMonthGrid(new Date(now), events), [dayKey, events])
 
+  /* eslint-disable react-hooks/set-state-in-effect -- keep the calendar selection aligned when the day rolls over. */
   useEffect(() => {
     setSelectedDay(now.getDate())
     setAgendaOpen(false)
   }, [dayKey])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const selectedAgenda = useMemo(
     () =>
@@ -180,7 +178,7 @@ export function HomeDashboard({
           <h1 className="dash__time">{formatClock(now)}</h1>
         </div>
         <div className="dash__actions" aria-label="快捷入口">
-          <button type="button" className="icon-btn" aria-label="目录">
+          <button type="button" className="icon-btn" aria-label="今日播报" onClick={onOpenBrief}>
             <IconBook />
           </button>
           <button

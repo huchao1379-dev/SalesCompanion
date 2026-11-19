@@ -1,6 +1,7 @@
 import './AccountInsight.css'
 import { useEffect, useId, useMemo, useState } from 'react'
 import { AgentLabel } from '../../components/AgentLabel'
+import { ContactCard } from '../../components/ContactCard'
 import {
   IconBuilding,
   IconChevronRight,
@@ -8,7 +9,6 @@ import {
   IconEye,
   IconPlus,
   IconRefresh,
-  IconUser,
 } from '../../components/DashIcons'
 import { ScreenHeader } from '../../components/ScreenHeader'
 import { SourceChips } from '../../components/SourceChips'
@@ -609,27 +609,24 @@ function ContactsPanel({
 
 function ContactRow({ contact }: { contact: AccountProfileView['contacts'][number] }) {
   return (
-    <li>
-      <span className="account-profile__contact-icon" aria-hidden>
-        <IconUser />
-      </span>
-      <div>
-        <strong>
-          {contact.name}
-          {contact.isPrimary ? <em className="account-profile__pill">主联系人</em> : null}
-        </strong>
-        <p>
-          {contact.title} · {contact.department} · 角色 {contact.role}
-        </p>
-        <p className="muted">最近联系 {contact.lastContactAt || '待补充'}</p>
-        {contact.canViewChannels && contact.channelsVisible ? (
-          <p className="muted">
-            {[contact.phone, contact.email].filter(Boolean).join(' · ') || '业务联系方式待补充'}
+    <li className="account-profile__contact-item">
+      <ContactCard
+        name={contact.name}
+        title={contact.title}
+        badge={contact.isPrimary ? '主联系人' : undefined}
+        primary={contact.isPrimary}
+        details={[
+          `${contact.department} · 角色 ${contact.role}`,
+          `最近联系 ${contact.lastContactAt || '待补充'}`,
+        ]}
+        footer={
+          <p className="contact-card__footer">
+            {contact.canViewChannels && contact.channelsVisible
+              ? [contact.phone, contact.email].filter(Boolean).join(' · ') || '业务联系方式待补充'
+              : '无权限查看联系方式'}
           </p>
-        ) : (
-          <p className="muted">无权限查看联系方式</p>
-        )}
-      </div>
+        }
+      />
     </li>
   )
 }

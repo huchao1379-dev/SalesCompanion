@@ -1,6 +1,6 @@
 import './ActivityCapture.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { DraftPayload } from '../../agents/types'
+import type { AccountProfile, DraftPayload } from '../../agents/types'
 import { getOrchestratorMode, orchestrate } from '../../agents/orchestratorClient'
 import {
   IconBuilding,
@@ -13,7 +13,7 @@ import {
 import { DraftCard } from '../../components/DraftCard'
 import { MicButton } from '../../components/MicButton'
 import { ScreenHeader } from '../../components/ScreenHeader'
-import { getAccountInsight } from '../../data/accounts'
+import { fetchAccountInsight, getAccountInsight } from '../../data/accounts'
 import {
   confirmAndSyncDetailed,
   discardDraft,
@@ -103,7 +103,7 @@ const PHASE_COPY: Record<
   },
   sync_success: {
     title: '同步成功',
-    detail: '草稿已写入。若 ID 以 MOCK- 开头，表示为本地模拟（后端未连通）。',
+    detail: '草稿已确认并进入模拟同步态（synced 仅表示已回写，不代表真实 SAP）。',
     tone: 'ok',
   },
   sync_failed: {
@@ -155,10 +155,28 @@ export function ActivityCapture({
   const recordStartedAt = useRef<number | null>(null)
   const [elapsed, setElapsed] = useState(0)
 
-  const contextAccount = useMemo(() => {
+  const accountRefForContext = useMemo(() => {
     const fromDraft = drafts.find((d) => d.accountRef)?.accountRef
-    return getAccountInsight(accountKey || fromDraft || 'SAP-ACC-RENJI')
+    return accountKey || fromDraft || 'SAP-ACC-RENJI'
   }, [accountKey, drafts])
+
+  const [contextAccount, setContextAccount] = useState<AccountProfile | null>(() =>
+    getAccountInsight(accountRefForContext),
+  )
+
+  useEffect(() => {
+    let alive = true
+    void fetchAccountInsight(accountRefForContext)
+      .then((profile) => {
+        if (alive && profile) setContextAccount(profile)
+      })
+      .catch(() => {
+        /* Keep the offline/seed fallback. */
+      })
+    return () => {
+      alive = false
+    }
+  }, [accountRefForContext])
 
   const openOppNames = useMemo(
     () => contextAccount?.openOpportunities.map((o) => o.name) ?? [],
@@ -192,6 +210,7 @@ export function ActivityCapture({
     return () => window.clearInterval(id)
   }, [speech.listening])
 
+  /* eslint-disable react-hooks/set-state-in-effect -- Browser Speech API errors are external events mirrored into the capture phase. */
   useEffect(() => {
     if (!speech.errorKind) return
     if (speech.errorKind === 'not-allowed') {
@@ -212,6 +231,7 @@ export function ActivityCapture({
       setStatusDetail(speech.error)
     }
   }, [speech.errorKind, speech.error, phase])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function applyDuplicateHints(list: DraftPayload[]): DraftPayload[] {
     if (!contextAccount?.openOpportunities.length) return list
@@ -265,6 +285,7 @@ export function ActivityCapture({
       const res = await orchestrate({
         utterance: trimmed,
         locale: 'zh-CN',
+        turnId: `capture_${trimmed.slice(0, 80)}`,
         context: contextAccount
           ? { accountId: contextAccount.accountRef, accountName: contextAccount.accountName }
           : undefined,
@@ -708,7 +729,7 @@ export function ActivityCapture({
 
       {usedMockSync ? (
         <p className="capture-screen__mock-banner" role="status">
-          当前同步结果含【本地模拟】标记：后端确认接口未连通，未伪造真实 SAP 成功。
+          后端确认接口不可用：草稿已保留为「同步失败」，不会伪造 SAP 成功。请检查 API 后重试。
         </p>
       ) : null}
 

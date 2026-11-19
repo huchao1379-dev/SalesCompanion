@@ -9,6 +9,7 @@ import { activityCreateAgent } from './activityCreate.agent.js'
 import { opportunityCreateAgent } from './opportunityCreate.agent.js'
 import { orderQueryAgent } from './orderQuery.agent.js'
 import { workSummaryAgent } from './workSummary.agent.js'
+import { opportunitySupervisorAgent } from './opportunitySupervisor.agent.js'
 
 let booted = false
 
@@ -18,6 +19,7 @@ export function ensureAgentsRegistered(): void {
   register(accountProfileAgent)
   register(activityCreateAgent)
   register(opportunityCreateAgent)
+  register(opportunitySupervisorAgent)
   register(orderQueryAgent)
   register(workSummaryAgent)
   booted = true

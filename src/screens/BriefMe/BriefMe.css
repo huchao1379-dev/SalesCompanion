@@ -243,3 +243,8 @@
   background: var(--surface-solid);
   color: var(--text);
 }
+
+.insights-sheet__subtitle.is-warn {
+  color: #b45309;
+  font-weight: 650;
+}

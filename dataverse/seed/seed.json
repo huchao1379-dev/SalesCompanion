@@ -6,7 +6,7 @@
       "name": "上海仁济医院",
       "region": "华东",
       "creditLevel": "A",
-      "lastVisitAt": "2026-04-22T10:00:00.000Z",
+      "lastVisitAt": "2026-11-12T10:00:00.000Z",
       "visitCount30d": 4,
       "npsDelta": "+12",
       "hasMsa": true,
@@ -18,11 +18,11 @@
       "name": "Hospital Alpha",
       "region": "LATAM",
       "creditLevel": "A",
-      "lastVisitAt": "2026-04-29T14:00:00.000Z",
+      "lastVisitAt": "2026-11-14T14:00:00.000Z",
       "visitCount30d": 3,
       "npsDelta": "+8",
       "hasMsa": true,
-      "notes": "今日拜访关注 A3 演示反馈；ICU 升级评估可能在 6 月启动。"
+      "notes": "今日拜访关注 A3 演示反馈；ICU 升级评估可能在 6 月启动（备注，待核实）。"
     },
     {
       "id": "acc-beta",
@@ -30,11 +30,11 @@
       "name": "Hospital Beta",
       "region": "LATAM",
       "creditLevel": "B",
-      "lastVisitAt": "2026-04-10T09:00:00.000Z",
+      "lastVisitAt": "2026-11-05T09:00:00.000Z",
       "visitCount30d": 2,
       "npsDelta": "-3",
       "hasMsa": false,
-      "notes": "N17 商机信心度偏低，建议确认采购窗口。"
+      "notes": "N17 商机信心度偏低，建议确认采购窗口（备注，待核实）。"
     },
     {
       "id": "acc-gamma",
@@ -42,7 +42,7 @@
       "name": "Hospital Gamma",
       "region": "华东",
       "creditLevel": "A",
-      "lastVisitAt": "2026-04-28T11:00:00.000Z",
+      "lastVisitAt": "2026-11-15T11:00:00.000Z",
       "visitCount30d": 1,
       "npsDelta": "+5",
       "hasMsa": true,
@@ -54,11 +54,11 @@
       "name": "Hospital Delta",
       "region": "华北",
       "creditLevel": "B",
-      "lastVisitAt": "2026-03-30T08:00:00.000Z",
+      "lastVisitAt": "2026-10-28T08:00:00.000Z",
       "visitCount30d": 1,
       "npsDelta": "0",
       "hasMsa": false,
-      "notes": "麻醉机报价过期，需重新跟进。"
+      "notes": "麻醉机报价过期，需重新跟进（备注，待核实）。"
     }
   ],
   "contacts": [
@@ -93,8 +93,8 @@
       "currencyCode": "USD",
       "stage": "Identify",
       "confidenceScore": 0.78,
-      "closeDate": "2026-09-30",
-      "syncStatus": "synced",
+      "closeDate": "2027-03-31",
+      "syncStatus": "Synced",
       "isSeed": true
     },
     {
@@ -110,8 +110,8 @@
       "currencyCode": "USD",
       "stage": "Identify",
       "confidenceScore": 0.78,
-      "closeDate": "2026-09-30",
-      "syncStatus": "synced",
+      "closeDate": "2027-06-30",
+      "syncStatus": "Synced",
       "isSeed": true
     },
     {
@@ -127,8 +127,8 @@
       "currencyCode": "USD",
       "stage": "Identify",
       "confidenceScore": 0.55,
-      "closeDate": "2026-08-15",
-      "syncStatus": "synced",
+      "closeDate": "2027-04-15",
+      "syncStatus": "Synced",
       "isSeed": true
     }
   ],
@@ -139,7 +139,7 @@
       "name": "Alpha · A1 监护仪订单",
       "accountId": "acc-alpha",
       "status": "清关中",
-      "orderedAt": "2026-04-01",
+      "orderedAt": "2026-10-01",
       "amount": 96000,
       "currencyCode": "USD"
     },
@@ -149,7 +149,7 @@
       "name": "仁济 · 既往监护仪订单",
       "accountId": "acc-renji",
       "status": "已发货",
-      "orderedAt": "2025-11-12",
+      "orderedAt": "2026-09-12",
       "amount": 72000,
       "currencyCode": "USD"
     }
@@ -160,7 +160,7 @@
       "orderId": "ord-alpha-1",
       "name": "Alpha 海运批次 A",
       "status": "清关中",
-      "eta": "2026-05-08",
+      "eta": "2026-11-28",
       "trackingNo": "MSKU-88421"
     },
     {
@@ -168,7 +168,7 @@
       "orderId": "ord-renji-1",
       "name": "仁济空运批次 R1",
       "status": "已签收",
-      "eta": "2025-12-01",
+      "eta": "2026-10-12",
       "trackingNo": "CA-99210"
     }
   ],

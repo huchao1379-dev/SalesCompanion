@@ -39,6 +39,9 @@
 | **13** | [**Dataverse 建表规格**](13-dataverse-table-spec.md) | 列/Choice/种子 | **执行** |
 | **14** | [**Demo 整体计划**](14-demo-plan.md) | 小型 Demo 权威计划 | **执行** |
 | **15** | [**Demo 范围矩阵**](15-demo-scope-matrix.md) | 必做/选做/不做 | **执行** |
+| 16 | [Agent 接入评审与达标计划](16-agent-integration-review-and-plan.md) | Agent 接入现状 / 提示词优化 / 实施计划 | 参考 |
+| 17 | [P0 整改实施记录](17-p0-implementation-notes.md) | 本轮已改内容 / UI / 验证 | **本轮已完成** |
+| 18 | [对话页 UI 迭代记录](18-ui-iteration.md) | 今日播报入口 / 输入框 / ContactCard | 参考 |
 
 ## 按角色阅读路径
 
@@ -48,6 +51,8 @@
 2. [14 Demo 计划](14-demo-plan.md)  
 3. [13 Dataverse 建表](13-dataverse-table-spec.md)  
 4. [03 消息契约](03-agent-architecture.md) · [12 开工指南](12-phase1-build-guide.md)  
+5. [16 Agent 接入评审与达标计划](16-agent-integration-review-and-plan.md)（现状差距 / 提示词 / 实施顺序）  
+6. [17 P0 整改实施记录](17-p0-implementation-notes.md)（本轮改动与验证） 
 
 ### 产品 / 看愿景
 

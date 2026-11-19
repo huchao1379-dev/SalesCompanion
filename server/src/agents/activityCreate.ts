@@ -1,24 +1,15 @@
 import { config } from '../config.js'
 import type { AccountRecord, ActivityDraft, ContactRecord, ExtractedVisit, SourceRef } from '../types.js'
+import { nowIsoInZone } from '../util/datetime.js'
 
 function uid(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`
 }
 
-function nextWednesday(): string {
-  const d = new Date()
-  const day = d.getDay()
-  const add = (3 - day + 7) % 7 || 7
-  d.setDate(d.getDate() + add)
-  return d.toISOString().slice(0, 10)
-}
-
-function todayWindow() {
-  const start = new Date()
-  start.setMinutes(0, 0, 0)
-  const end = new Date(start)
-  end.setHours(end.getHours() + 1)
-  return { start: start.toISOString(), end: end.toISOString() }
+function endOfVisit(startIso: string) {
+  const start = new Date(startIso)
+  if (Number.isNaN(start.getTime())) return undefined
+  return new Date(start.getTime() + 60 * 60 * 1000).toISOString()
 }
 
 export function createActivityDraft(params: {
@@ -27,10 +18,11 @@ export function createActivityDraft(params: {
   account?: AccountRecord
   contact?: ContactRecord
   sessionKey?: string
+  idempotencyKey?: string
 }): ActivityDraft {
-  const { utterance, extracted, account, contact, sessionKey } = params
-  const window = todayWindow()
+  const { utterance, extracted, account, contact, sessionKey, idempotencyKey } = params
   const stamp = new Date().toISOString()
+  const occurredAt = extracted.occurredAt || nowIsoInZone()
   const accountName = account?.name || extracted.accountName || '待确认客户'
   const contactName = contact?.name || extracted.contactName || '待确认联系人'
   const product =
@@ -67,15 +59,16 @@ export function createActivityDraft(params: {
     accountId: account?.id,
     contactName,
     contactId: contact?.id,
-    scheduledStart: window.start,
-    scheduledEnd: window.end,
-    followUpAt: extracted.followUpHint?.includes('周三') ? nextWednesday() : nextWednesday(),
+    occurredAt,
+    scheduledStart: occurredAt,
+    scheduledEnd: endOfVisit(occurredAt),
+    followUpAt: extracted.followUpAt || '',
     transcript: utterance,
     syncStatus: 'Draft',
     confidence: extracted.confidence,
     sources,
     agentName: '活动创建 Agent',
-    idempotencyKey: uid('actkey'),
+    idempotencyKey: idempotencyKey || uid('actkey'),
     sessionKey,
     promptVersion: config.promptVersion,
     createdAt: stamp,

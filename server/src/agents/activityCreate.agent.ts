@@ -1,5 +1,6 @@
 import type { DomainAgent } from './agentTypes.js'
 import { createActivityDraft } from './activityCreate.js'
+import { draftIdempotencyKey } from './draftKeys.js'
 import * as tools from '../tools/dataverseTools.js'
 
 export const activityCreateAgent: DomainAgent = {
@@ -12,11 +13,13 @@ export const activityCreateAgent: DomainAgent = {
         messages: [
           {
             id: `msg_${Math.random().toString(36).slice(2, 10)}`,
-            role: 'assistant',
+            role: 'assistant' as const,
+            agent_id: 'ActivityCreate',
             agent_name: '活动创建 Agent',
             content: '缺少实体抽取结果，无法生成活动草稿。',
             sources: [],
             confidence: 0.3,
+            confidence_kind: 'extraction' as const,
             createdAt: new Date().toISOString(),
           },
         ],
@@ -24,14 +27,16 @@ export const activityCreateAgent: DomainAgent = {
       }
     }
 
-    const activity = createActivityDraft({
-      utterance: ctx.utterance,
-      extracted: ctx.state.extracted,
-      account: ctx.state.account,
-      contact: ctx.state.contact,
-      sessionKey: ctx.sessionKey,
-    })
-    await tools.upsertActivityDraft(activity)
+    const activity = await tools.upsertActivityDraft(
+      createActivityDraft({
+        utterance: ctx.utterance,
+        extracted: ctx.state.extracted,
+        account: ctx.state.account,
+        contact: ctx.state.contact,
+        sessionKey: ctx.sessionKey,
+        idempotencyKey: draftIdempotencyKey('activity', ctx),
+      }),
+    )
 
     return {
       drafts: [activity],
@@ -40,10 +45,12 @@ export const activityCreateAgent: DomainAgent = {
         {
           id: `msg_${Math.random().toString(36).slice(2, 10)}`,
           role: 'assistant',
+          agent_id: 'ActivityCreate',
           agent_name: activity.agentName,
           content: activity.summary,
           sources: activity.sources,
           confidence: activity.confidence,
+          confidence_kind: 'extraction',
           draft: activity,
           createdAt: activity.createdAt,
         },

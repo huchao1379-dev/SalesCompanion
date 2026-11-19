@@ -1,7 +1,6 @@
 /**
- * Template Domain Agent — copy this file to add your own.
+ * Work summary Domain Agent.
  *
- * Steps:
  * 1. Implement `run` (use tools/*, never call other agents).
  * 2. register(workSummaryAgent) in ./catalog.ts
  * 3. Add intent in types + intent.ts (if new route).
@@ -9,53 +8,88 @@
  * 5. Frontend: no change — still POST /api/orchestrate
  */
 import type { DomainAgent } from './agentTypes.js'
+import type { ActivityDraft, MessageUiBlock } from '../types.js'
 import * as tools from '../tools/dataverseTools.js'
 import { chatStructured, hasDeepSeek } from '../llm/deepseek.js'
 import { workSummaryOutputSchema } from '../llm/schemas.js'
 import { WORK_SUMMARY_SYSTEM } from './prompts.js'
+import { addDays, isoDateInZone, toIsoDate, todayIsoDate, zonedParts } from '../util/datetime.js'
+
+function dateRangeForWeekly(now = new Date()) {
+  const p = zonedParts(now)
+  const start = addDays(p.year, p.month, p.day, -6)
+  return `${toIsoDate(start.year, start.month, start.day)} ~ ${todayIsoDate(now)}`
+}
 
 export const workSummaryAgent: DomainAgent = {
   name: 'WorkSummary',
   displayName: '工作总结 Agent',
-  description: '根据今日活动/草稿生成简短工作总结（DeepSeek 或启发式）',
+  description: '根据今日/本周活动草稿生成结构化工作总结（DeepSeek 或启发式）',
   intents: ['work_summary'],
   async run(ctx) {
-    const drafts = (await tools.listActivityDrafts()).filter((d) => d.syncStatus !== 'Discarded')
-    const today = new Date().toISOString().slice(0, 10)
-    const todays = drafts.filter((d) => (d.updatedAt || d.createdAt).startsWith(today))
-    const list = (todays.length ? todays : drafts).slice(0, 5)
+    const allDrafts = (await tools.listActivityDrafts()).filter(
+      (draft) => draft.syncStatus !== 'Discarded',
+    )
+    const today = todayIsoDate()
+    const weekly = /周报|本周|这周/.test(ctx.utterance)
+    const rangeStart = weekly
+      ? (() => {
+          const p = zonedParts()
+          const d = addDays(p.year, p.month, p.day, -6)
+          return toIsoDate(d.year, d.month, d.day)
+        })()
+      : today
+    const scoped = allDrafts.filter((draft) => {
+      const date = isoDateInZone(draft.updatedAt || draft.createdAt)
+      return date >= rangeStart && date <= today
+    })
+    const list = (scoped.length ? scoped : allDrafts).slice(0, 8)
 
     if (list.length === 0) {
-      return {
-        messages: [
-          {
-            id: `msg_${Math.random().toString(36).slice(2, 10)}`,
-            role: 'assistant',
-            agent_name: '工作总结 Agent',
-            content:
-              '今天还没有活动草稿。可以说一句拜访结果先录入，再让我帮你写总结。',
-            sources: [],
-            confidence: 0.7,
-            agent_chain: ['Orchestrator', '工作总结 Agent'],
-            createdAt: new Date().toISOString(),
-          },
-        ],
-        mode: 'heuristic',
+      const message = {
+        id: `msg_${Math.random().toString(36).slice(2, 10)}`,
+        role: 'assistant' as const,
+        agent_id: 'WorkSummary',
+        agent_name: '工作总结 Agent',
+        content: '今天还没有活动草稿。可以说一句拜访结果先录入，再让我帮你写总结。',
+        sources: [],
+        confidence: 0.72,
+        confidence_kind: 'answer' as const,
+        agent_chain: ['Orchestrator', '工作总结 Agent'],
+        createdAt: new Date().toISOString(),
+        ui: {
+          type: 'clarify' as const,
+          title: '还没有可总结的活动',
+          question: '要先录入一条拜访吗？',
+          examples: [
+            '刚拜访仁济医院张主任，N17 要 12 台，下周三再约',
+            '帮我写今日工作小结',
+          ],
+          tone: 'info' as const,
+        },
       }
+      return { messages: [message], mode: 'heuristic' as const }
     }
 
-    const facts = list.map((d) => ({
-      accountName: d.accountName,
-      contactName: d.contactName,
-      subject: d.subject,
-      summary: d.summary,
-      syncStatus: d.syncStatus,
-      confidence: d.confidence,
+    const facts = list.map((draft) => ({
+      id: draft.id,
+      accountName: draft.accountName,
+      contactName: draft.contactName,
+      subject: draft.subject,
+      summary: draft.summary,
+      syncStatus: draft.syncStatus,
+      confidence: draft.confidence,
+      updatedAt: draft.updatedAt,
     }))
 
     let content: string
+    let sections: NonNullable<MessageUiBlock['sections']>
     let mode: 'deepseek' | 'heuristic' = 'heuristic'
     let confidence = 0.8
+
+    const fallback = heuristicSummary(ctx.utterance, list, weekly)
+    content = fallback.content
+    sections = fallback.sections
 
     if (hasDeepSeek()) {
       try {
@@ -63,74 +97,86 @@ export const workSummaryAgent: DomainAgent = {
           system: WORK_SUMMARY_SYSTEM,
           user: JSON.stringify({
             request: ctx.utterance,
-            style: ctx.utterance.includes('周报') ? 'weekly' : 'daily',
+            style: weekly ? 'weekly' : 'daily',
+            dateRange: weekly ? dateRangeForWeekly() : today,
+            timezone: 'Asia/Shanghai',
             activities: facts,
-            instruction: '按本次请求口吻撰写，避免每次同一段套话。',
+            instruction: '按本次请求口吻撰写，避免每次同一段套话；每个要点带活动 ID。',
           }),
-          temperature: 0.4,
+          temperature: 0.35,
+          maxTokens: 700,
           schema: workSummaryOutputSchema,
         })
         if (data.summary.trim()) {
           content = data.summary.trim()
+          sections = (data.sections || []).map((section) => ({
+            heading: section.heading,
+            bullets: section.bullets.map((bullet) => ({
+              text: bullet.text,
+              activityId: bullet.activityId,
+              status: bullet.status,
+            })),
+          }))
           mode = m
           confidence = Math.max(0, Math.min(1, data.confidence ?? 0.82))
-        } else {
-          content = heuristicSummary(ctx.utterance, list)
         }
       } catch {
-        content = heuristicSummary(ctx.utterance, list)
+        content = fallback.content
+        sections = fallback.sections
       }
-    } else {
-      content = heuristicSummary(ctx.utterance, list)
+    }
+
+    const message = {
+      id: `msg_${Math.random().toString(36).slice(2, 10)}`,
+      role: 'assistant' as const,
+      agent_id: 'WorkSummary',
+      agent_name: '工作总结 Agent',
+      content,
+      sources: list.slice(0, 5).map((draft) => ({
+        kind: 'dataverse' as const,
+        label: draft.subject,
+        entity: 'crmai_activity',
+        id: draft.id,
+        ref: draft.idempotencyKey,
+      })),
+      confidence,
+      confidence_kind: 'answer' as const,
+      agent_chain: ['Orchestrator', '工作总结 Agent'],
+      createdAt: new Date().toISOString(),
+      ui: {
+        type: 'work_summary' as const,
+        title: weekly ? `本周工作小结 · ${list.length} 条活动` : `今日工作小结 · ${list.length} 条活动`,
+        sections,
+        footnote: '草稿状态的内容需确认后才算已核实；请提交前人工核对。',
+      },
     }
 
     return {
       mode,
-      messages: [
-        {
-          id: `msg_${Math.random().toString(36).slice(2, 10)}`,
-          role: 'assistant',
-          agent_name: '工作总结 Agent',
-          content,
-          sources: list.slice(0, 3).map((d) => ({
-            kind: 'dataverse' as const,
-            label: d.subject,
-            entity: 'crmai_activity',
-            id: d.id,
-            ref: d.idempotencyKey,
-          })),
-          confidence,
-          agent_chain: ['Orchestrator', '工作总结 Agent'],
-          createdAt: new Date().toISOString(),
-        },
-      ],
+      messages: [message],
     }
   },
 }
 
 function heuristicSummary(
   utterance: string,
-  list: Array<{
-    accountName: string
-    contactName: string
-    subject?: string
-    summary?: string
-    syncStatus: string
-    confidence: number
-  }>,
-) {
-  const weekly = /周报/.test(utterance)
+  list: ActivityDraft[],
+  weekly: boolean,
+): { content: string; sections: NonNullable<MessageUiBlock['sections']> } {
   const title = weekly
     ? `本周工作小结（基于 ${list.length} 条活动草稿）`
     : `今日工作小结（基于 ${list.length} 条活动草稿）`
-  const lines = list.map((d, i) => {
-    const focus = d.summary?.trim() || d.subject || `${d.accountName} · ${d.contactName}`
-    const low = d.confidence < 0.7 ? '（待确认）' : ''
-    return `${i + 1}. ${d.accountName} / ${d.contactName}：${focus}${low} · ${d.syncStatus}`
+  const bullets = list.map((draft) => {
+    const focus = draft.summary?.trim() || draft.subject || `${draft.accountName} · ${draft.contactName}`
+    const low = draft.confidence < 0.7 ? '（待确认）' : ''
+    return {
+      text: `${draft.accountName} / ${draft.contactName}：${focus}${low}`,
+      activityId: draft.id,
+      status: draft.syncStatus,
+    }
   })
-  return [
-    title,
-    ...lines,
-    weekly ? '以上可作周报素材，提交前请人工核对数字与客户名。' : '以上可作日报素材，Confirm 前请人工润色。',
-  ].join('\n')
+  return {
+    content: [title, ...bullets.map((bullet, index) => `${index + 1}. ${bullet.text}`)].join('\n'),
+    sections: [{ heading: weekly ? '本周要点' : '今日要点', bullets }],
+  }
 }

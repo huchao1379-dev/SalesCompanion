@@ -23,7 +23,8 @@ import {
   accountProfileToolResultSchema,
   accountQueryTools,
 } from '../tools/readOnlyAgentTools.js'
-import { ACCOUNT_PROFILE_SYSTEM } from './prompts.js'
+import { ACCOUNT_PROFILE_SYSTEM, ACCOUNT_PROFILE_TOOL_ADDENDUM } from './prompts.js'
+import { nowIsoInZone } from '../util/datetime.js'
 
 export async function resolveAccount(query: string): Promise<AccountRecord | undefined> {
   const hits = await repository.searchAccounts(query)
@@ -81,6 +82,13 @@ function profileFacts(account: AccountRecord, profileData: AccountProfileData) {
       entity: 'crmai_account',
       id: account.id,
     },
+    ...opps.slice(0, 4).map((opportunity) => ({
+      kind: 'dataverse' as const,
+      label: `${opportunity.name} · ${opportunity.stage}`,
+      ref: opportunity.externalKey || opportunity.id,
+      entity: 'crmai_opportunity',
+      id: opportunity.id,
+    })),
   ]
 
   const facts = {
@@ -90,7 +98,6 @@ function profileFacts(account: AccountRecord, profileData: AccountProfileData) {
     visitCount30d: account.visitCount30d,
     npsDelta: account.npsDelta,
     lastVisitAt: account.lastVisitAt,
-    notes: account.notes,
     contacts: contacts.map((c) => ({ name: c.name, title: c.title })),
     opportunities: opps.map((o) => ({
       name: o.name,
@@ -102,7 +109,19 @@ function profileFacts(account: AccountRecord, profileData: AccountProfileData) {
     })),
   }
 
-  return { facts, sources, opps, contacts }
+  const dataAsOf = latestDataAt(account, opps)
+  const staleDays = account.lastVisitAt && !Number.isNaN(new Date(account.lastVisitAt).getTime())
+    ? Math.max(0, Math.floor((Date.now() - new Date(account.lastVisitAt).getTime()) / 86_400_000))
+    : undefined
+
+  return {
+    facts,
+    unverifiedNotes: account.notes,
+    meta: { dataAsOf, staleDays },
+    sources,
+    opps,
+    contacts,
+  }
 }
 
 function detectProfileFocus(utterance?: string) {
@@ -276,6 +295,7 @@ function buildAccountPulseUi(
 
   const footnoteParts = [
     dataAt ? `数据更新于 ${dataAt}` : null,
+    visitStale && lastVisit ? `最近拜访 ${lastVisit}（已超过 30 天，数据可能过期）` : null,
     seedish ? '种子演示数据，请核实是否为最新 CRM 状态' : '请以 CRM 实时数据为准',
   ].filter(Boolean)
 
@@ -305,9 +325,11 @@ function shortProfileSummary(
   const credit = `信用 ${account.creditLevel || '—'}`
   const msa = account.hasMsa ? '框架协议已签' : '框架协议未签'
   const lastVisit = formatDate(account.lastVisitAt)
-  const visits = lastVisit
-    ? `近 30 天 ${account.visitCount30d ?? 0} 次拜访（最近 ${lastVisit}）`
-    : `近 30 天 ${account.visitCount30d ?? 0} 次拜访`
+  const visits = isStaleVisitWindow(account.lastVisitAt) && lastVisit
+    ? `最近一次拜访 ${lastVisit}（已超过 30 天，数据可能过期）`
+    : lastVisit
+      ? `近 30 天 ${account.visitCount30d ?? 0} 次拜访（最近 ${lastVisit}）`
+      : `近 30 天 ${account.visitCount30d ?? 0} 次拜访`
   const pipeline = openPipelineAmount(opps)
   const oppLine = pipeline
     ? `开放商机 ${opps.length} 个，合计 ${formatMoney(pipeline.total, pipeline.currency)}`
@@ -349,16 +371,26 @@ export async function buildAccountProfileMessage(
   const focus = detectProfileFocus(utterance)
   const hint = normalizeSuggestion(suggestion) || defaultSuggestion(account, opps, focus)
   const ui = buildAccountPulseUi(account, data, hint)
+  ui.unverifiedNotes = account.notes
   const content = shortProfileSummary(account, focus, opps)
+  const completeness = [
+    account.creditLevel,
+    account.lastVisitAt,
+    data.contacts.length > 0,
+    opps.length > 0,
+  ].filter(Boolean).length
+  const confidence = Math.max(0.45, Math.min(0.95, 0.5 + completeness * 0.11))
 
   return {
     id: `msg_${Math.random().toString(36).slice(2, 10)}`,
     role: 'assistant',
+    agent_id: 'AccountProfile',
     agent_name: '客户画像 Agent',
     content,
     sources,
-    // Query replies are CRM facts, not extraction confidence for sales users.
-    confidence: 0,
+    // Query replies are answer confidence, not extraction confidence.
+    confidence,
+    confidence_kind: 'answer',
     agent_chain: ['客户画像 Agent'],
     createdAt: new Date().toISOString(),
     ui,
@@ -375,7 +407,7 @@ export async function synthesizeAccountProfile(
   const fallback = await buildAccountProfileMessage(account, utterance, data)
   if (!hasDeepSeek()) return { message: fallback, mode: 'heuristic' }
 
-  const { facts, sources } = profileFacts(account, data)
+  const { facts, sources, unverifiedNotes, meta } = profileFacts(account, data)
   try {
     const { data: output, mode } = await chatStructured({
       system: ACCOUNT_PROFILE_SYSTEM,
@@ -383,10 +415,13 @@ export async function synthesizeAccountProfile(
         question: utterance || '客户最近怎么样？',
         focusHint: detectProfileFocus(utterance),
         facts,
+        unverifiedNotes,
+        meta,
         instruction:
-          'summary 只写已确认事实；suggestion 为空或以「AI 建议，待核实：」开头；禁止写出赢单率/confidenceScore。',
+          'summary 只写已确认事实；unverifiedNotes 只放备注/推测；suggestion 为空或以「AI 建议，待核实：」开头；禁止写出赢单率/confidenceScore。',
       }),
       temperature: 0.3,
+      maxTokens: 520,
       schema: accountProfileOutputSchema,
     })
     if (!output.summary.trim()) return { message: fallback, mode: 'heuristic' }
@@ -396,12 +431,13 @@ export async function synthesizeAccountProfile(
       message: {
         ...fallback,
         content: output.summary.trim(),
-        confidence: 0,
+        confidence: Math.max(0.3, Math.min(1, output.confidence ?? fallback.confidence)),
         sources,
         ui: fallback.ui
           ? {
               ...fallback.ui,
               hint,
+              unverifiedNotes: output.unverifiedNotes || unverifiedNotes,
             }
           : fallback.ui,
       },
@@ -417,10 +453,16 @@ export async function queryAccountProfileWithTools(
   knownAccountId?: string,
 ): Promise<{ account: AccountRecord; message: AgentMessage; mode: 'deepseek' }> {
   const { finalText, toolResults } = await chatWithTools({
-    system: `${ACCOUNT_PROFILE_SYSTEM}\n\n先使用工具查询客户事实，再基于工具结果回答。有已知客户 ID 时直接调用 get_account_profile；否则先调用 search_accounts，再用匹配项 ID 调用 get_account_profile。只输出 JSON：{"summary":"...","suggestion":"AI 建议，待核实：…或空字符串","confidence":0到1,"emphasis":"credit|visits|opportunities|contacts|overview"}。工具未返回的数据不得推测；不要输出赢单率百分比。`,
-    user: JSON.stringify({ question: utterance, knownAccountId }),
+    system: `${ACCOUNT_PROFILE_SYSTEM}\n\n${ACCOUNT_PROFILE_TOOL_ADDENDUM}`,
+    user: JSON.stringify({
+      question: utterance,
+      knownAccountId,
+      now: nowIsoInZone(),
+      timezone: 'Asia/Shanghai',
+    }),
     tools: accountQueryTools,
     temperature: 0.2,
+    maxTokens: 520,
     maxToolRounds: 3,
   })
 
@@ -444,11 +486,12 @@ export async function queryAccountProfileWithTools(
     message: {
       ...fallback,
       content: output.summary?.trim() || fallback.content,
-      confidence: 0,
+      confidence: Math.max(0.3, Math.min(1, output.confidence ?? fallback.confidence)),
       ui: fallback.ui
         ? {
             ...fallback.ui,
             hint: normalizeSuggestion(output.suggestion) || fallback.ui.hint,
+            unverifiedNotes: output.unverifiedNotes || fallback.ui.unverifiedNotes,
           }
         : fallback.ui,
     },

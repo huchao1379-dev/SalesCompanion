@@ -1,6 +1,6 @@
 import './DraftCard.css'
 import type { DraftPayload, OpportunityDraftPayload } from '../agents/types'
-import { canConfirm, canEditDraft, canRetrySync } from '../data/syncStatus'
+import { canConfirm, canEditDraft, canRetrySync, SYNC_STATUS_LABEL } from '../data/syncStatus'
 import { AgentLabel } from './AgentLabel'
 import { SourceChips } from './SourceChips'
 import { SyncStatusBadge } from './SyncStatusBadge'
@@ -110,9 +110,10 @@ export function DraftCard({
 
   return (
     <article className={`draft-card draft-card--${draft.kind}`}>
-      {draft.syncStatus === 'Draft' ? (
-        <div className="draft-card__ribbon">AI · {kindLabel}</div>
-      ) : null}
+      <div className="draft-card__ribbon">
+        AI 生成 · {kindLabel}
+        {draft.syncStatus !== 'Draft' ? ` · ${SYNC_STATUS_LABEL[draft.syncStatus]}` : ''}
+      </div>
       <header className="draft-card__header">
         <div className="draft-card__heading">
           <span className={`draft-card__kind ${draft.kind === 'opportunity' ? 'is-opp' : 'is-visit'}`}>
@@ -148,6 +149,28 @@ export function DraftCard({
           >
             改为追加既有商机
           </button>
+        </div>
+      ) : null}
+
+      {draft.reviewFindings && draft.reviewFindings.length > 0 ? (
+        <div className={`draft-card__review is-${draft.reviewStatus || 'passed'}`}>
+          <div className="draft-card__review-head">
+            <strong>督导建议</strong>
+            <span>
+              {draft.reviewStatus === 'blocked'
+                ? '有阻断项'
+                : draft.reviewStatus === 'warn'
+                  ? '需核对'
+                  : '已通过'}
+            </span>
+          </div>
+          <ul>
+            {draft.reviewFindings.map((finding) => (
+              <li key={`${finding.code}-${finding.message}`} className={`is-${finding.severity}`}>
+                {finding.message}
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 
@@ -378,7 +401,7 @@ export function DraftCard({
               />
             </label>
           ) : null}
-          {draft.supervisorHints.length > 0 ? (
+          {draft.supervisorHints.length > 0 && !draft.reviewFindings?.length ? (
             <ul className="draft-card__hints">
               {draft.supervisorHints.map((h) => (
                 <li key={h}>{h}</li>

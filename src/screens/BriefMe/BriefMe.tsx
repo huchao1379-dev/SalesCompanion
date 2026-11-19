@@ -32,16 +32,16 @@ const SWIPE_THRESHOLD = 48
 const MIN_PLAY_MS_BEFORE_ADVANCE = 700
 
 const DEFAULT_INSIGHT = {
-  label: 'Performance Analysis',
-  headline: 'Achieved 67% of quarterly sales target',
+  label: '业绩分析',
+  headline: '本季度销售目标已完成 67%',
   body:
-    'Your team has secured $500K against a $750K target. Progress is solid, but focus should be maintained on closing the remaining $250K this quarter to stay on track.',
+    '团队已完成 50 万美元，目标 75 万美元。整体进度稳健，接下来重点推进剩余 25 万美元的成交。',
 }
 
 function chapterToInsight(chapter: BriefChapter | undefined, index: number) {
   if (index === 0) return DEFAULT_INSIGHT
   if (!chapter) return DEFAULT_INSIGHT
-  const labels = ['Performance Analysis', 'Risk Outlook', 'Sync Health', 'Account Pulse']
+  const labels = ['业绩分析', '风险展望', '同步健康度', '客户脉搏']
   const body = [chapter.summary, ...chapter.points].filter(Boolean).join(' ')
   return {
     label: labels[index] ?? chapter.title,
@@ -54,6 +54,7 @@ export function BriefMe({ open, onClose }: Props) {
   const [chapters, setChapters] = useState(() => buildBriefChapters(listDrafts()))
   const [page, setPage] = useState(0)
   const [playing, setPlaying] = useState(false)
+  const [ttsError, setTtsError] = useState('')
   const [elapsed, setElapsed] = useState(0)
   const [dragX, setDragX] = useState(0)
 
@@ -78,7 +79,7 @@ export function BriefMe({ open, onClose }: Props) {
     while (base.length < PAGE_COUNT) {
       base.push({
         title: '今日行动建议',
-        summary: 'Here is your business briefing for today.',
+        summary: '这是今天的业务播报。',
         points: [
           '优先确认待同步草稿，避免漏跟进。',
           '对风险商机安排一次短会核对采购窗口。',
@@ -90,7 +91,9 @@ export function BriefMe({ open, onClose }: Props) {
     return base.slice(0, PAGE_COUNT)
   }, [chapters])
 
-  pagesRef.current = pages
+  useEffect(() => {
+    pagesRef.current = pages
+  }, [pages])
 
   useEffect(() => {
     return subscribeDrafts((drafts) => {
@@ -120,13 +123,24 @@ export function BriefMe({ open, onClose }: Props) {
     setPlaying(false)
   }, [])
 
-  const speakPage = useCallback((index: number, opts?: { fromUserGesture?: boolean; playlist?: boolean }) => {
+  const speakPage = useCallback((
+    index: number,
+    opts?: { fromUserGesture?: boolean; playlist?: boolean; autoPlay?: boolean },
+  ) => {
     const fromUserGesture = opts?.fromUserGesture ?? false
     const playlist = opts?.playlist ?? false
+    const autoPlay = opts?.autoPlay ?? false
     const current = pagesRef.current[index]
-    if (!current || !window.speechSynthesis) {
+    if (!current) {
       playlistRef.current = false
       setPlaying(false)
+      return
+    }
+    if (typeof window === 'undefined' || !window.speechSynthesis) {
+      playlistRef.current = false
+      userArmedPlayRef.current = false
+      setPlaying(false)
+      setTtsError('当前运行环境不支持语音播报，请使用 Chrome 或 Edge 浏览器。')
       return
     }
 
@@ -150,11 +164,16 @@ export function BriefMe({ open, onClose }: Props) {
     const text = [insight.headline, insight.body].join('。')
 
     setElapsed(0)
-    setPlaying(true)
+    setPlaying(false)
+    setTtsError('')
 
-    void speakText(text, {
+    speakText(text, {
       lang: 'zh-CN',
       rate: 1,
+      onStart: () => {
+        if (gen !== speakGen.current) return
+        setPlaying(true)
+      },
       onEnd: () => {
         if (gen !== speakGen.current) return
         const livedMs = Date.now() - speakStartedAt.current
@@ -168,16 +187,29 @@ export function BriefMe({ open, onClose }: Props) {
           pageRef.current = next
           setPage(next)
           setElapsed(0)
+          // eslint-disable-next-line react-hooks/immutability -- recursive playlist advance
           speakPage(next, { fromUserGesture: false, playlist: true })
           return
         }
         playlistRef.current = false
         setPlaying(false)
       },
-      onError: () => {
+      onError: (error) => {
         if (gen !== speakGen.current) return
         playlistRef.current = false
+        userArmedPlayRef.current = false
         setPlaying(false)
+        setTtsError(
+          error.error === 'not-allowed'
+            ? autoPlay
+              ? '浏览器拦截了自动播报，请点击播放按钮开始。'
+              : '浏览器没有启动语音播报，请检查语音权限或使用 Chrome/Edge 重试。'
+            : error.error === 'language-unavailable' ||
+                error.error === 'voice-unavailable' ||
+                error.error === 'synthesis-unavailable'
+              ? '当前设备没有可用的中文语音，请检查系统语音设置。'
+              : '语音播报启动失败，请检查浏览器权限或稍后重试。',
+        )
       },
     })
   }, [])
@@ -201,6 +233,7 @@ export function BriefMe({ open, onClose }: Props) {
     [speakPage, stopSpeak],
   )
 
+  /* eslint-disable react-hooks/set-state-in-effect -- open/close and first-card reset are intentional side effects. */
   useEffect(() => {
     if (!open) {
       stopSpeak()
@@ -212,11 +245,13 @@ export function BriefMe({ open, onClose }: Props) {
     setPage(0)
     setElapsed(0)
     setDragX(0)
+    setTtsError('')
     const t = window.setTimeout(() => {
-      speakPage(0, { fromUserGesture: true, playlist: true })
+      speakPage(0, { fromUserGesture: true, playlist: true, autoPlay: true })
     }, 80)
     return () => window.clearTimeout(t)
   }, [open, speakPage, stopSpeak])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function refresh() {
     setChapters(buildBriefChapters(listDrafts()))
@@ -342,7 +377,13 @@ export function BriefMe({ open, onClose }: Props) {
             <p className="insights-sheet__meta">
               {timeLabel} · {paragraphLabel}
             </p>
-            <p className="insights-sheet__subtitle">Here is your business briefing for today.</p>
+            <p className={`insights-sheet__subtitle${ttsError ? ' is-warn' : ''}`}>
+              {ttsError
+                ? ttsError
+                : playing
+                  ? '正在播报…'
+                  : '打开时会尝试自动播报；如浏览器拦截，请点击播放按钮。'}
+            </p>
           </div>
 
           <div className="insights-sheet__controls">
@@ -359,7 +400,9 @@ export function BriefMe({ open, onClose }: Props) {
                   stopSpeak()
                   return
                 }
-                // Only start TTS from an explicit user tap — never on sheet open.
+                setTtsError('')
+                // Start synchronously from the user's click so browser autoplay
+                // restrictions do not block an explicitly requested playback.
                 speakPage(pageRef.current, { fromUserGesture: true, playlist: true })
               }}
             >

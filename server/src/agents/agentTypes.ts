@@ -8,9 +8,16 @@ import type {
   Intent,
   OpportunityDraft,
   OpportunityRecord,
+  ReviewFinding,
 } from '../types.js'
 
 export type { Intent }
+
+export type ConversationTurn = {
+  role: string
+  content: string
+  agentName?: string
+}
 
 /** Shared memory + structured state passed along a pipeline. */
 export type PipelineState = {
@@ -20,17 +27,24 @@ export type PipelineState = {
   existingOpportunity?: OpportunityRecord
   activity?: ActivityDraft
   opportunity?: OpportunityDraft
+  review?: ReviewFinding[]
 }
 
 export type AgentContext = {
   utterance: string
   locale?: string
   sessionKey?: string
+  /** Stable per-turn id; used for draft idempotency. */
+  turnId?: string
   intent: Intent
   /** String bag for Shared Memory (persisted on conversation). */
   memory: Record<string, string>
   /** Typed bag for sequential / fan-out steps. */
   state: PipelineState
+  /** Recent conversation turns (already truncated) for multi-turn prompts. */
+  history?: ConversationTurn[]
+  /** Known account names/aliases from the active store, for extraction grounding. */
+  knownAccounts?: Array<{ id: string; name: string; aliases?: string[] }>
   modes: Set<'deepseek' | 'heuristic'>
 }
 
@@ -39,6 +53,7 @@ export type AgentResult = {
   drafts?: DraftPayload[]
   memoryPatch?: Record<string, string>
   statePatch?: Partial<PipelineState>
+  review?: ReviewFinding[]
   /** Stop remaining steps in a sequential pipeline. */
   halt?: boolean
   mode?: 'deepseek' | 'heuristic'

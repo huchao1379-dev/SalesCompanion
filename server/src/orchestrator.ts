@@ -6,16 +6,21 @@ import { requireAgent } from './agents/registry.js'
 import type {
   AgentContext,
   AgentResult,
+  ConversationTurn,
   PipelineDef,
   PipelineState,
 } from './agents/agentTypes.js'
 import { repository } from './store/dataverseStore.js'
 import type {
   AgentMessage,
+  AgentStep,
   DraftPayload,
   Intent,
+  MessageUiMetric,
   OrchestratorRequest,
   OrchestratorResponse,
+  ReviewFinding,
+  SourceRef,
 } from './types.js'
 
 /**
@@ -25,7 +30,13 @@ import type {
 const PIPELINES: Partial<Record<Intent, PipelineDef>> = {
   capture_visit: {
     mode: 'sequential',
-    agents: ['EntityExtract', 'AccountProfile', 'ActivityCreate', 'OpportunityCreate'],
+    agents: [
+      'EntityExtract',
+      'AccountProfile',
+      'ActivityCreate',
+      'OpportunityCreate',
+      'OpportunitySupervisor',
+    ],
   },
   query_account: {
     mode: 'fanout',
@@ -41,8 +52,41 @@ const PIPELINES: Partial<Record<Intent, PipelineDef>> = {
   },
 }
 
+const AGENT_IDS: Record<string, string> = {
+  Orchestrator: 'Orchestrator',
+  销售Copilot: 'Orchestrator',
+  实体抽取: 'EntityExtract',
+  客户画像Agent: 'AccountProfile',
+  活动创建Agent: 'ActivityCreate',
+  商机创建Agent: 'OpportunityCreate',
+  商机督导Agent: 'OpportunitySupervisor',
+  订单查询Agent: 'OrderQuery',
+  工作总结Agent: 'WorkSummary',
+}
+
+const AGENT_ALIASES: Record<string, string[]> = {
+  上海仁济医院: ['仁济', '仁济医院'],
+  'Hospital Alpha': ['Alpha'],
+  'Hospital Beta': ['Beta'],
+  'Hospital Gamma': ['Gamma'],
+  'Hospital Delta': ['Delta'],
+}
+
 function uid(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+function clamp(value: number) {
+  return Math.max(0, Math.min(1, value))
+}
+
+function agentIdFor(name: string, fallback = 'Orchestrator') {
+  if (!name) return fallback
+  if (AGENT_IDS[name]) return AGENT_IDS[name]
+  const compact = name.replace(/\s+/g, '')
+  if (AGENT_IDS[compact]) return AGENT_IDS[compact]
+  if (/^[A-Za-z][A-Za-z0-9]*$/.test(name)) return name
+  return fallback
 }
 
 function mergeResult(
@@ -51,69 +95,171 @@ function mergeResult(
   ctx: AgentContext,
 ) {
   if (result.messages?.length) into.messages.push(...result.messages)
-  if (result.drafts?.length) into.drafts.push(...result.drafts)
+  for (const draft of result.drafts ?? []) {
+    const idx = into.drafts.findIndex((item) => item.idempotencyKey === draft.idempotencyKey)
+    if (idx >= 0) into.drafts[idx] = draft
+    else into.drafts.push(draft)
+  }
   if (result.memoryPatch) Object.assign(ctx.memory, result.memoryPatch)
   if (result.statePatch) Object.assign(ctx.state, result.statePatch)
+  if (result.review) ctx.state.review = result.review
   if (result.mode) ctx.modes.add(result.mode)
 }
 
-async function runSequential(agentNames: string[], ctx: AgentContext) {
-  const bag = { messages: [] as AgentMessage[], drafts: [] as DraftPayload[] }
-  for (const name of agentNames) {
-    const agent = requireAgent(name)
-    const result = await agent.run(ctx)
-    mergeResult(bag, result, ctx)
-    if (result.halt) break
+async function safeLog(row: Parameters<typeof repository.writeLog>[0]) {
+  try {
+    await repository.writeLog(row)
+  } catch {
+    /* Logging must never break the user turn. */
   }
-  return bag
 }
 
-async function runFanout(agentNames: string[], ctx: AgentContext) {
-  const bag = { messages: [] as AgentMessage[], drafts: [] as DraftPayload[] }
-  // Parallel: each agent gets a shallow-cloned state/memory view; merge after.
-  const results = await Promise.all(
-    agentNames.map(async (name) => {
-      const agent = requireAgent(name)
-      const branchCtx: AgentContext = {
-        ...ctx,
-        memory: { ...ctx.memory },
-        state: { ...ctx.state },
-        modes: new Set(ctx.modes),
-      }
-      const result = await agent.run(branchCtx)
-      return { result, branchCtx }
-    }),
-  )
-  for (const { result, branchCtx } of results) {
-    mergeResult(bag, result, ctx)
-    Object.assign(ctx.memory, branchCtx.memory)
-    Object.assign(ctx.state, branchCtx.state)
-    for (const m of branchCtx.modes) ctx.modes.add(m)
-  }
-  return bag
-}
-
-function synthesizeVisitComposite(
+async function runAgentWithLog(
+  name: string,
   ctx: AgentContext,
-  _drafts: DraftPayload[],
-  _stepMessages: AgentMessage[],
-): AgentMessage[] {
-  const account = ctx.state.account
-  const opportunity = ctx.state.opportunity
-  const activity = ctx.state.activity
-  const extracted = ctx.state.extracted
-  if (!activity && !opportunity) return _stepMessages
+  steps: AgentStep[],
+): Promise<AgentResult> {
+  const agent = requireAgent(name)
+  const started = performance.now()
+  try {
+    const result = await agent.run(ctx)
+    const latencyMs = Math.round(performance.now() - started)
+    const confidence =
+      result.messages?.find((message) => message.confidence > 0)?.confidence ??
+      result.drafts?.[0]?.confidence
+    const status = result.mode === 'heuristic' && hasDeepSeek() ? 'fallback' : 'ok'
+    steps.push({
+      agentId: agent.name,
+      agentName: agent.displayName,
+      status,
+      latencyMs,
+      summary: result.messages?.[0]?.content.slice(0, 120) ||
+        (result.drafts?.length ? `生成 ${result.drafts.length} 条草稿` : undefined),
+    })
+    await safeLog({
+      sessionId: ctx.sessionKey,
+      agentName: agent.displayName,
+      inputSummary: ctx.utterance.slice(0, 500),
+      outputEnvelope: JSON.stringify({
+        agentId: agent.name,
+        messages: result.messages?.length ?? 0,
+        drafts: result.drafts?.map((draft) => draft.idempotencyKey) ?? [],
+        review: result.review?.length ?? 0,
+      }),
+      latencyMs,
+      success: true,
+      confidence,
+      promptVersion: config.promptVersion,
+      modelName: hasDeepSeek() ? config.deepseekModel : 'heuristic',
+      fallbackReason: status === 'fallback' ? 'agent returned heuristic output' : undefined,
+    })
+    if (result.mode) ctx.modes.add(result.mode)
+    return result
+  } catch (error) {
+    const latencyMs = Math.round(performance.now() - started)
+    steps.push({
+      agentId: agent.name,
+      agentName: agent.displayName,
+      status: 'error',
+      latencyMs,
+      errorCode: error instanceof Error ? error.message.slice(0, 120) : 'unknown',
+    })
+    await safeLog({
+      sessionId: ctx.sessionKey,
+      agentName: agent.displayName,
+      inputSummary: ctx.utterance.slice(0, 500),
+      latencyMs,
+      success: false,
+      errorMessage: error instanceof Error ? error.message : 'unknown',
+      errorCode: 'AGENT_FAILED',
+      promptVersion: config.promptVersion,
+      modelName: hasDeepSeek() ? config.deepseekModel : 'heuristic',
+    })
+    throw error
+  }
+}
+
+async function runSequential(agentNames: string[], ctx: AgentContext, steps: AgentStep[]) {
+  const bag = { messages: [] as AgentMessage[], drafts: [] as DraftPayload[] }
+  const snapshot = repository.snapshotDrafts?.()
+  try {
+    for (const name of agentNames) {
+      const result = await runAgentWithLog(name, ctx, steps)
+      mergeResult(bag, result, ctx)
+      if (result.halt) break
+    }
+    return bag
+  } catch (error) {
+    if (snapshot) repository.restoreDrafts?.(snapshot)
+    throw error
+  }
+}
+
+async function runFanout(agentNames: string[], ctx: AgentContext, steps: AgentStep[]) {
+  const bag = { messages: [] as AgentMessage[], drafts: [] as DraftPayload[] }
+  const snapshot = repository.snapshotDrafts?.()
+  try {
+    const results = await Promise.all(
+      agentNames.map(async (name) => {
+        const branchSteps: AgentStep[] = []
+        const branchCtx: AgentContext = {
+          ...ctx,
+          memory: { ...ctx.memory },
+          state: { ...ctx.state },
+          modes: new Set(ctx.modes),
+        }
+        const result = await runAgentWithLog(name, branchCtx, branchSteps)
+        steps.push(...branchSteps)
+        return { result, branchCtx }
+      }),
+    )
+    for (const { result, branchCtx } of results) {
+      mergeResult(bag, result, ctx)
+      Object.assign(ctx.memory, branchCtx.memory)
+      Object.assign(ctx.state, branchCtx.state)
+      for (const mode of branchCtx.modes) ctx.modes.add(mode)
+    }
+    return bag
+  } catch (error) {
+    if (snapshot) repository.restoreDrafts?.(snapshot)
+    throw error
+  }
+}
+
+function dedupeSources(sources: SourceRef[]) {
+  return sources.filter(
+    (source, index, list) =>
+      list.findIndex(
+        (item) =>
+          item.kind === source.kind &&
+          item.label === source.label &&
+          (item.ref || '') === (source.ref || ''),
+      ) === index,
+  )
+}
+
+function reviewFor(ctx: AgentContext): ReviewFinding[] {
+  return ctx.state.review || ctx.state.opportunity?.reviewFindings || ctx.state.activity?.reviewFindings || []
+}
+
+function synthesizeVisitComposite(ctx: AgentContext): AgentMessage[] {
+  const { account, opportunity, activity, extracted } = ctx.state
+  if (!activity && !opportunity) return []
 
   const chain = [
     'EntityExtract',
-    '客户画像 Agent',
-    '活动创建 Agent',
-    '商机创建 Agent',
+    'AccountProfile',
+    'ActivityCreate',
+    'OpportunityCreate',
+    'OpportunitySupervisor',
   ]
-
   const product = [extracted?.productLine, extracted?.productModel].filter(Boolean).join(' ')
   const qty = extracted?.quantity ? `${extracted.quantity} 台` : ''
   const contact = extracted?.contactName || activity?.contactName
+  const findings = reviewFor(ctx)
+  const blocked = findings.some((finding) => finding.severity === 'block')
+  const warnings = findings.filter((finding) => finding.severity === 'warn')
+
   const head = account
     ? `已根据你的口述生成草稿：${account.name}`
     : '已根据口述生成草稿，但客户未命中种子库'
@@ -129,108 +275,331 @@ function synthesizeVisitComposite(
     : opportunity
       ? '并已生成新商机草稿'
       : '已生成活动草稿'
+  const reviewLine = blocked
+    ? '督导发现阻断项，请先补全客户信息。'
+    : warnings.length
+      ? `督导提醒：${warnings[0].message}`
+      : '督导未发现阻断问题。'
   const tail = account ? '请确认或编辑后提交。' : '请先编辑客户名称再确认。'
 
   const content = [
     [head, ...detailParts].filter(Boolean).join('，'),
     accountMeta,
-    `${oppLine}。${tail}`,
+    `${oppLine}。${reviewLine}${tail}`,
   ]
     .filter(Boolean)
     .join('。')
     .replace(/。。+/g, '。')
 
-  // One summary bubble for the turn. Step/draft agents still produce drafts;
-  // repeating their chat lines + identical SourceChips clutters the thread.
-  const sources = [
-    ...(activity?.sources ?? []),
-    ...(opportunity?.sources ?? []),
-  ].filter(
-    (s, i, arr) =>
-      arr.findIndex(
-        (x) => x.kind === s.kind && x.label === s.label && (x.ref || '') === (s.ref || ''),
-      ) === i,
-  )
+  const metrics: MessageUiMetric[] = [
+    {
+      label: '活动草稿',
+      value: activity ? (activity.followUpAt ? `跟进 ${activity.followUpAt}` : '待补跟进') : '未生成',
+      tone: activity ? 'accent' : 'warn',
+      priority: 'primary',
+    },
+    {
+      label: '商机',
+      value: opportunity
+        ? opportunity.reuseExisting
+          ? '关联既有'
+          : '新建草稿'
+        : '未生成',
+      tone: opportunity?.reuseExisting ? 'good' : opportunity ? 'accent' : 'neutral',
+      priority: 'primary',
+    },
+  ]
+
+  const facts = [
+    { label: '客户', value: account?.name || activity?.accountName || '待确认', tone: account ? 'good' as const : 'warn' as const },
+    { label: '联系人', value: contact || activity?.contactName || '待确认', tone: contact ? 'neutral' as const : 'warn' as const },
+    { label: '产品', value: product || '待确认', tone: product ? 'neutral' as const : 'warn' as const },
+    { label: '数量', value: qty || '待确认', tone: qty ? 'neutral' as const : 'warn' as const },
+    { label: '下次跟进', value: activity?.followUpAt || '待确认', tone: activity?.followUpAt ? 'good' as const : 'warn' as const },
+  ]
 
   return [
     {
       id: uid('msg'),
       role: 'assistant',
-      agent_name: 'Orchestrator',
+      agent_id: 'Orchestrator',
+      agent_name: '销售 Copilot',
       content,
-      sources,
-      confidence: Math.min(
-        activity?.confidence ?? 1,
-        opportunity?.confidence ?? 1,
-      ),
+      sources: dedupeSources([...(activity?.sources ?? []), ...(opportunity?.sources ?? [])]),
+      confidence: Math.min(activity?.confidence ?? 1, opportunity?.confidence ?? 1),
+      confidence_kind: 'composite',
       agent_chain: chain,
       createdAt: new Date().toISOString(),
+      ui: {
+        type: 'capture_result',
+        title: account?.name || '本次拜访草稿',
+        metrics,
+        facts,
+        findings,
+        footnote: '草稿尚未写入业务系统；确认后才会进入同步流程。',
+      },
     },
   ]
 }
 
+function errorMessage(intent: Intent, error: unknown): AgentMessage {
+  return {
+    id: uid('msg'),
+    role: 'assistant',
+    agent_id: 'Orchestrator',
+    agent_name: 'Orchestrator',
+    content: `处理「${intent}」时遇到问题：${
+      error instanceof Error ? error.message.slice(0, 160) : '未知错误'
+    }。请稍后重试，或改用规则兜底。`,
+    sources: [],
+    confidence: 0.3,
+    confidence_kind: 'answer',
+    agent_chain: ['Orchestrator'],
+    createdAt: new Date().toISOString(),
+    ui: {
+      type: 'clarify',
+      title: '处理失败',
+      question: '要重试还是换一种说法？',
+      examples: ['帮我写今日工作小结', '仁济医院最近怎么样？'],
+      tone: 'warn',
+    },
+  }
+}
+
+function normalizeMessage(message: AgentMessage, fallbackAgentId = 'Orchestrator'): AgentMessage {
+  const agentId = message.agent_id || agentIdFor(message.agent_name, fallbackAgentId)
+  const confidence = clamp(
+    message.confidence > 0
+      ? message.confidence
+      : message.draft
+        ? 0.65
+        : 0.72,
+  )
+  const confidenceKind =
+    message.confidence_kind ||
+    (message.draft
+      ? 'extraction'
+      : agentId === 'Orchestrator'
+        ? 'composite'
+        : 'answer')
+  return {
+    ...message,
+    agent_id: agentId,
+    confidence,
+    confidence_kind: confidenceKind,
+    sources: message.sources || [],
+  }
+}
+
+function knownAccountAliases() {
+  return Object.entries(AGENT_ALIASES).flatMap(([name, aliases]) => [name, ...aliases])
+}
+
+async function buildContext(req: OrchestratorRequest, intent: Intent, history: ConversationTurn[], memory: Record<string, string>) {
+  const accounts = await repository.listAccounts()
+  const ctx: AgentContext = {
+    utterance: req.utterance.trim(),
+    locale: req.locale,
+    sessionKey: req.context?.conversationId || req.context?.sessionKey,
+    turnId: req.turnId,
+    intent,
+    memory,
+    state: {} as PipelineState,
+    history,
+    knownAccounts: accounts.map((account) => ({
+      id: account.id,
+      name: account.name,
+      aliases: AGENT_ALIASES[account.name] || [account.externalKey.split(/[-_]/).at(-1) || ''],
+    })),
+    modes: new Set<'deepseek' | 'heuristic'>(),
+  }
+  return ctx
+}
+
 export async function orchestrate(req: OrchestratorRequest): Promise<OrchestratorResponse> {
   ensureAgentsRegistered()
-  const t0 = performance.now()
+  const startedAt = performance.now()
   const utterance = req.utterance.trim()
   const sessionKey = req.context?.conversationId || req.context?.sessionKey
 
-  const intentResult = await classifyIntent(utterance)
-  let intent = intentResult.intent
+  let serverMemory: Record<string, string> = {}
+  let history: ConversationTurn[] = []
+  let previousMessages: unknown[] = []
+  if (sessionKey) {
+    try {
+      const conversation = await repository.getConversation(sessionKey)
+      if (conversation) {
+        serverMemory = JSON.parse(conversation.contextJson) as Record<string, string>
+        previousMessages = JSON.parse(conversation.messagesJson) as unknown[]
+        history = previousMessages
+          .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+          .map((item) => ({
+            role: String(item.role || 'assistant'),
+            content: String(item.content || '').slice(0, 300),
+            agentName: typeof item.agent_name === 'string' ? item.agent_name : undefined,
+          }))
+          .filter((turn) => turn.content.trim().length > 0)
+          .slice(-8)
+      }
+    } catch {
+      /* Corrupt conversation cache must not block a turn. */
+    }
+  }
 
-  if (intent === 'clarify' && req.context?.accountId) {
+  // Server-side Shared Memory wins over client-supplied context.
+  const memory: Record<string, string> = { ...(req.context || {}), ...serverMemory }
+  const intentStarted = performance.now()
+  const intentResult = await classifyIntent(utterance, {
+    history,
+    memory,
+    knownAccounts: (await repository.listAccounts()).map((account) => ({
+      name: account.name,
+      aliases: AGENT_ALIASES[account.name] || [],
+    })),
+  })
+  let intent = intentResult.intent
+  if (
+    intent === 'clarify' &&
+    memory.accountId &&
+    !/你能做|能做什么|有什么功能|怎么用|你好|嗨|hello|hi/i.test(utterance) &&
+    /那|它|这个|这家|刚才|这单|那单/.test(utterance)
+  ) {
     intent = 'query_account'
   }
 
-  const ctx: AgentContext = {
-    utterance,
-    locale: req.locale,
-    sessionKey,
-    intent,
-    memory: { ...(req.context || {}) },
-    state: {} as PipelineState,
-    modes: new Set<'deepseek' | 'heuristic'>([intentResult.mode]),
-  }
+  const ctx = await buildContext(req, intent, history, memory)
+  ctx.modes.add(intentResult.mode)
+  const steps: AgentStep[] = [
+    {
+      agentId: 'IntentRouter',
+      agentName: '意图路由',
+      status: intentResult.mode === 'heuristic' && hasDeepSeek() ? 'fallback' : 'ok',
+      latencyMs: Math.round(performance.now() - intentStarted),
+      summary: `${intentResult.intent} · ${(intentResult.confidence * 100).toFixed(0)}%`,
+    },
+  ]
+  await safeLog({
+    sessionId: sessionKey,
+    agentName: 'IntentRouter',
+    inputSummary: utterance.slice(0, 500),
+    outputEnvelope: JSON.stringify(intentResult),
+    latencyMs: steps[0].latencyMs,
+    success: true,
+    confidence: intentResult.confidence,
+    promptVersion: config.promptVersion,
+    modelName: hasDeepSeek() ? config.deepseekModel : 'heuristic',
+  })
 
   let messages: AgentMessage[] = []
   let drafts: DraftPayload[] = []
+  let pipelineError: unknown
 
-  if (intent === 'clarify') {
-    const clarify = await buildClarifyReply(utterance, { reason: intentResult.reason })
-    messages = [clarify.message]
+  const missingAccount =
+    intentResult.missingSlots.includes('account') &&
+    !memory.accountId &&
+    !/仁济|Hospital|医院/.test(utterance)
+  const shouldClarify =
+    intent === 'clarify' ||
+    intentResult.needsClarification ||
+    intentResult.confidence < 0.6 ||
+    missingAccount
+
+  if (shouldClarify) {
+    const clarifyStarted = performance.now()
+    const clarify = await buildClarifyReply(utterance, {
+      reason: intentResult.reason,
+      focus: intentResult.focus,
+      missingSlots: intentResult.missingSlots,
+      history,
+      memory,
+      knownAccounts: knownAccountAliases(),
+    })
     ctx.modes.add(clarify.mode)
+    messages = [clarify.message]
+    steps.push({
+      agentId: 'Clarify',
+      agentName: '澄清 Agent',
+      status: clarify.mode === 'heuristic' && hasDeepSeek() ? 'fallback' : 'ok',
+      latencyMs: Math.round(performance.now() - clarifyStarted),
+      summary: clarify.message.content.slice(0, 80),
+    })
+    await safeLog({
+      sessionId: sessionKey,
+      agentName: 'Clarify',
+      inputSummary: utterance.slice(0, 500),
+      outputEnvelope: JSON.stringify({ intent, focus: intentResult.focus, missingSlots: intentResult.missingSlots }),
+      latencyMs: steps[steps.length - 1].latencyMs,
+      success: true,
+      confidence: clarify.message.confidence,
+      promptVersion: config.promptVersion,
+      modelName: hasDeepSeek() ? config.deepseekModel : 'heuristic',
+    })
   } else {
     const pipeline = PIPELINES[intent]
     if (!pipeline || pipeline.agents.length === 0) {
-      const clarify = await buildClarifyReply(utterance, {
-        reason: intentResult.reason || '无可用流水线',
-      })
-      messages = [clarify.message]
-      ctx.modes.add(clarify.mode)
+      messages = [errorMessage(intent, new Error('无可用流水线'))]
     } else {
-      const bag =
-        pipeline.mode === 'fanout'
-          ? await runFanout(pipeline.agents, ctx)
-          : await runSequential(pipeline.agents, ctx)
-
-      drafts = bag.drafts
-      if (intent === 'capture_visit') {
-        messages =
-          ctx.state.activity || ctx.state.opportunity
-            ? synthesizeVisitComposite(ctx, drafts, bag.messages)
-            : bag.messages
-      } else {
-        // query_account / query_order / work_summary: use agent messages directly
-        // (avoid duplicating the same content under an Orchestrator wrapper).
-        messages = bag.messages
+      try {
+        const bag =
+          pipeline.mode === 'fanout'
+            ? await runFanout(pipeline.agents, ctx, steps)
+            : await runSequential(pipeline.agents, ctx, steps)
+        drafts = bag.drafts
+        if (intent === 'capture_visit') {
+          const composite = synthesizeVisitComposite(ctx)
+          messages = composite.length ? composite : bag.messages
+        } else {
+          messages = bag.messages
+        }
+      } catch (error) {
+        pipelineError = error
+        messages = [errorMessage(intent, error)]
       }
     }
   }
 
-  const latencyMs = Math.round(performance.now() - t0)
-  const mode = ctx.modes.has('deepseek') ? 'deepseek' : 'heuristic'
+  if (!messages.length && drafts.length === 0) {
+    messages = [
+      normalizeMessage({
+        id: uid('msg'),
+        role: 'assistant',
+        agent_name: 'Orchestrator',
+        content: '暂时没有可展示的答复。可以换个说法，或先说明客户和要办的事。',
+        sources: [],
+        confidence: 0.4,
+        confidence_kind: 'answer',
+        createdAt: new Date().toISOString(),
+      }),
+    ]
+  }
 
-  await repository.writeLog({
+  messages = messages.map((message) => normalizeMessage(message))
+  ctx.memory.lastIntent = intent
+  ctx.memory.lastUtterance = utterance
+  if (ctx.state.account) {
+    ctx.memory.accountId = ctx.state.account.id
+    ctx.memory.accountName = ctx.state.account.name
+    ctx.memory.accountRef = ctx.state.account.externalKey
+  }
+  if (ctx.state.opportunity?.existingOpportunityRef) {
+    ctx.memory.opportunityId = ctx.state.opportunity.existingOpportunityRef
+  }
+
+  const latencyMs = Math.round(performance.now() - startedAt)
+  const modes = ctx.modes
+  const mode: OrchestratorResponse['mode'] = !hasDeepSeek()
+    ? 'heuristic'
+    : modes.has('deepseek') && modes.has('heuristic')
+      ? 'mixed'
+      : modes.has('heuristic')
+        ? 'heuristic'
+        : 'deepseek'
+  const fallbackSteps = steps.filter((step) => step.status === 'fallback' || step.status === 'error')
+  const degradedReason = fallbackSteps.length
+    ? `部分步骤降级：${fallbackSteps.map((step) => step.agentName).join('、')}`
+    : undefined
+
+  await safeLog({
     sessionId: sessionKey,
     agentName: 'Orchestrator',
     inputSummary: utterance.slice(0, 500),
@@ -239,22 +608,40 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
       pipeline: PIPELINES[intent]?.agents ?? [],
       drafts: drafts.length,
       messages: messages.length,
+      steps: steps.map((step) => `${step.agentId}:${step.status}`),
+      error: pipelineError instanceof Error ? pipelineError.message : undefined,
     }),
     latencyMs,
-    success: true,
+    success: !pipelineError,
     confidence: messages[0]?.confidence,
+    errorMessage: pipelineError instanceof Error ? pipelineError.message : undefined,
+    errorCode: pipelineError ? 'PIPELINE_FAILED' : undefined,
     promptVersion: config.promptVersion,
     modelName: hasDeepSeek() ? config.deepseekModel : 'heuristic',
+    fallbackReason: degradedReason,
   })
 
   if (sessionKey) {
-    const prev = await repository.getConversation(sessionKey)
-    const prevMessages = prev ? (JSON.parse(prev.messagesJson) as unknown[]) : []
-    await repository.saveConversation(sessionKey, ctx.memory, [
-      ...prevMessages,
-      { role: 'user', content: utterance },
-      ...messages,
-    ])
+    try {
+      const stored = messages.map((message) => ({
+        role: message.role,
+        agent_id: message.agent_id,
+        agent_name: message.agent_name,
+        content: message.content,
+        sources: message.sources,
+        confidence: message.confidence,
+        confidence_kind: message.confidence_kind,
+        createdAt: message.createdAt,
+        ui: message.ui,
+      }))
+      await repository.saveConversation(sessionKey, ctx.memory, [
+        ...previousMessages.slice(-32),
+        { role: 'user', content: utterance, createdAt: new Date().toISOString() },
+        ...stored,
+      ].slice(-48))
+    } catch {
+      /* Conversation cache is best-effort. */
+    }
   }
 
   return {
@@ -264,5 +651,7 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
     latencyMs,
     intent,
     mode,
+    degraded_reason: degradedReason,
+    steps,
   }
 }

@@ -38,7 +38,9 @@ npm run dev
 | B 客户速览 | 「仁济医院最近怎么样？」 |
 | C 订单物流（选做） | 「查一下仁济医院上个订单的物流」 |
 
-编排：**DeepSeek**（有 Key）或启发式兜底；数据：**Dataverse 种子内存库**（`dataverse/seed/seed.json`）。
+编排：**DeepSeek**（默认；有 Key 时启用，否则启发式兜底）；数据：**Dataverse 种子内存库**（`dataverse/seed/seed.json`）。
+
+> Copilot Studio 接入代码保留为可选路径（`AI_PROVIDER=copilotstudio` + 管理端配置），Demo 默认不使用，也不作为验收前提。
 
 ## 环境变量（server/.env）
 
@@ -48,7 +50,7 @@ npm run dev
 | `DEEPSEEK_MODEL` | 默认 `deepseek-chat` |
 | `DATAVERSE_URL` / `DATAVERSE_TOKEN` | 可选；不填用内存种子 |
 
-无 Copilot Studio、无 AI Builder。
+Demo 默认不依赖 Copilot Studio / AI Builder；Copilot Studio 连接保留为可选路径（显式 `AI_PROVIDER=copilotstudio` 才启用）。
 
 ## 线上发布（Power Apps Code App）注意
 
