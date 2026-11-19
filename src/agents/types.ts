@@ -87,6 +87,44 @@ export type MessageDeliveryStatus = 'pending' | 'complete' | 'stopped' | 'error'
 
 export type MessageFailureKind = 'network' | 'query' | 'generation' | 'write' | 'unknown'
 
+export type MessageUiMetricTone = 'good' | 'warn' | 'neutral' | 'accent'
+
+export type MessageUiMetric = {
+  label: string
+  value: string
+  tone?: MessageUiMetricTone
+  /** Primary metrics stay large; secondary render as a compact strip. */
+  priority?: 'primary' | 'secondary'
+}
+
+export type MessageUiItem = {
+  title: string
+  subtitle?: string
+  badge?: string
+  kind?: 'opportunity' | 'contact' | 'other'
+}
+
+export type MessageUiAction = {
+  id: 'open_account' | 'open_opportunity' | string
+  label: string
+}
+
+/** Structured blocks for rich chat rendering (not raw JSON dump). */
+export type MessageUiBlock = {
+  type: 'account_pulse' | 'opportunity_list' | 'order_status' | 'metric_strip'
+  title?: string
+  metrics?: MessageUiMetric[]
+  items?: MessageUiItem[]
+  actions?: MessageUiAction[]
+  accountKey?: string
+  /** Business data provenance, e.g. "CRM 数据". */
+  originLabel?: string
+  /** Freshness line, e.g. "数据更新于 2026-11-18（种子演示数据，请核实）". */
+  footnote?: string
+  /** Explicit AI suggestion — never mix into confirmed facts. */
+  hint?: string
+}
+
 export type AgentMessage = {
   id: string
   role: AgentRole
@@ -97,6 +135,8 @@ export type AgentMessage = {
   draft?: DraftPayload
   agent_chain?: string[]
   createdAt: string
+  /** Optional rich UI payload rendered by the chat client. */
+  ui?: MessageUiBlock
   /** When the assistant finished generating (distinct from createdAt / send time). */
   completedAt?: string
   deliveryStatus?: MessageDeliveryStatus

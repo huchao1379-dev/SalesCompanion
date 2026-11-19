@@ -96,13 +96,13 @@ async function runFanout(agentNames: string[], ctx: AgentContext) {
 function synthesizeVisitComposite(
   ctx: AgentContext,
   _drafts: DraftPayload[],
-  stepMessages: AgentMessage[],
+  _stepMessages: AgentMessage[],
 ): AgentMessage[] {
   const account = ctx.state.account
   const opportunity = ctx.state.opportunity
   const activity = ctx.state.activity
   const extracted = ctx.state.extracted
-  if (!activity && !opportunity) return stepMessages
+  if (!activity && !opportunity) return _stepMessages
 
   const chain = [
     'EntityExtract',
@@ -140,25 +140,33 @@ function synthesizeVisitComposite(
     .join('。')
     .replace(/。。+/g, '。')
 
-  const composite: AgentMessage = {
-    id: uid('msg'),
-    role: 'assistant',
-    agent_name: 'Orchestrator',
-    content,
-    sources: activity?.sources ?? [],
-    confidence: Math.min(
-      activity?.confidence ?? 1,
-      opportunity?.confidence ?? 1,
-    ),
-    agent_chain: chain,
-    createdAt: new Date().toISOString(),
-  }
-
-  // Summary first; keep step/draft messages that add new content.
-  const extras = stepMessages.filter(
-    (m) => m.content.trim() && m.content.trim() !== composite.content.trim(),
+  // One summary bubble for the turn. Step/draft agents still produce drafts;
+  // repeating their chat lines + identical SourceChips clutters the thread.
+  const sources = [
+    ...(activity?.sources ?? []),
+    ...(opportunity?.sources ?? []),
+  ].filter(
+    (s, i, arr) =>
+      arr.findIndex(
+        (x) => x.kind === s.kind && x.label === s.label && (x.ref || '') === (s.ref || ''),
+      ) === i,
   )
-  return [composite, ...extras]
+
+  return [
+    {
+      id: uid('msg'),
+      role: 'assistant',
+      agent_name: 'Orchestrator',
+      content,
+      sources,
+      confidence: Math.min(
+        activity?.confidence ?? 1,
+        opportunity?.confidence ?? 1,
+      ),
+      agent_chain: chain,
+      createdAt: new Date().toISOString(),
+    },
+  ]
 }
 
 export async function orchestrate(req: OrchestratorRequest): Promise<OrchestratorResponse> {

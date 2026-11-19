@@ -11,6 +11,10 @@ import type {
   AccountRecord,
   AgentMessage,
   ContactRecord,
+  MessageUiBlock,
+  MessageUiItem,
+  MessageUiMetric,
+  MessageUiMetricTone,
   OpportunityRecord,
   SourceRef,
 } from '../types.js'
@@ -44,7 +48,17 @@ export type AccountProfileData = {
   opportunities: Array<
     Pick<
       OpportunityRecord,
-      'id' | 'externalKey' | 'name' | 'productLine' | 'productModel' | 'stage' | 'confidenceScore'
+      | 'id'
+      | 'externalKey'
+      | 'name'
+      | 'productLine'
+      | 'productModel'
+      | 'stage'
+      | 'amount'
+      | 'currencyCode'
+      | 'updatedAt'
+      | 'createdAt'
+      | 'isSeed'
     >
   >
 }
@@ -67,20 +81,6 @@ function profileFacts(account: AccountRecord, profileData: AccountProfileData) {
       entity: 'crmai_account',
       id: account.id,
     },
-    {
-      kind: 'dataverse',
-      label: `近 30 天拜访 ×${account.visitCount30d}`,
-      ref: account.id,
-      entity: 'crmai_account',
-      id: account.id,
-    },
-    ...opps.slice(0, 2).map((o) => ({
-      kind: 'dataverse' as const,
-      label: `${o.name} · ${o.stage}`,
-      ref: o.externalKey,
-      entity: 'crmai_opportunity',
-      id: o.id,
-    })),
   ]
 
   const facts = {
@@ -97,7 +97,8 @@ function profileFacts(account: AccountRecord, profileData: AccountProfileData) {
       productLine: o.productLine,
       productModel: o.productModel,
       stage: o.stage,
-      confidenceScore: o.confidenceScore,
+      amount: o.amount,
+      currencyCode: o.currencyCode,
     })),
   }
 
@@ -106,11 +107,234 @@ function profileFacts(account: AccountRecord, profileData: AccountProfileData) {
 
 function detectProfileFocus(utterance?: string) {
   const t = utterance || ''
-  if (/信用|评级|MSA|msa/.test(t)) return 'credit' as const
+  if (/信用|评级|MSA|msa|框架协议/.test(t)) return 'credit' as const
   if (/商机|机会|pipeline|阶段|定标/.test(t)) return 'opportunities' as const
   if (/联系人|主任|谁负责|对接/.test(t)) return 'contacts' as const
   if (/拜访|近访|上次|最近|NPS|nps/.test(t)) return 'visits' as const
   return 'overview' as const
+}
+
+function creditTone(level: string): MessageUiMetricTone {
+  const l = level.toUpperCase()
+  if (l.startsWith('A')) return 'good'
+  if (l.startsWith('B')) return 'accent'
+  if (l.startsWith('C') || l.startsWith('D')) return 'warn'
+  return 'neutral'
+}
+
+function npsTone(nps?: string): MessageUiMetricTone {
+  if (!nps) return 'neutral'
+  const n = Number.parseFloat(nps.replace(/[^\d.+-]/g, ''))
+  if (!Number.isFinite(n)) return 'neutral'
+  if (n > 0) return 'good'
+  if (n < 0) return 'warn'
+  return 'neutral'
+}
+
+const STAGE_LABEL: Record<string, string> = {
+  Identify: '识别阶段',
+  Qualify: '资格确认',
+  Propose: '方案报价',
+  Negotiate: '谈判',
+  Closed: '成交',
+}
+
+function stageLabel(stage: string) {
+  return STAGE_LABEL[stage] || stage || '阶段待确认'
+}
+
+function formatMoney(amount: number, currencyCode: string) {
+  const code = currencyCode || 'USD'
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: code,
+      maximumFractionDigits: 0,
+    }).format(amount)
+  } catch {
+    return `${code} ${amount.toLocaleString('en-US')}`
+  }
+}
+
+function formatDate(iso?: string) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function latestDataAt(account: AccountRecord, opps: AccountProfileData['opportunities']) {
+  const candidates = [
+    account.lastVisitAt,
+    ...opps.map((o) => o.updatedAt || o.createdAt),
+  ].filter(Boolean) as string[]
+  if (!candidates.length) return new Date().toISOString()
+  return candidates.sort((a, b) => b.localeCompare(a))[0]
+}
+
+function isStaleVisitWindow(lastVisitAt?: string) {
+  if (!lastVisitAt) return true
+  const t = new Date(lastVisitAt).getTime()
+  if (Number.isNaN(t)) return true
+  const days = (Date.now() - t) / (24 * 60 * 60 * 1000)
+  return days > 30
+}
+
+function normalizeSuggestion(raw?: string) {
+  const text = (raw || '').trim()
+  if (!text) return undefined
+  if (/^AI\s*建议/.test(text)) return text
+  return `AI 建议，待核实：${text}`
+}
+
+function openPipelineAmount(opps: AccountProfileData['opportunities']) {
+  if (!opps.length) return null
+  const currency = opps[0]?.currencyCode || 'USD'
+  const total = opps.reduce((sum, o) => sum + (Number.isFinite(o.amount) ? o.amount : 0), 0)
+  return { total, currency }
+}
+
+function buildAccountPulseUi(
+  account: AccountRecord,
+  profileData: AccountProfileData,
+  suggestion?: string,
+): MessageUiBlock {
+  const contact = profileData.contacts[0]
+  const opps = profileData.opportunities
+  const pipeline = openPipelineAmount(opps)
+  const lastVisit = formatDate(account.lastVisitAt)
+  const dataAt = formatDate(latestDataAt(account, opps))
+  const visitStale = isStaleVisitWindow(account.lastVisitAt)
+  const seedish = opps.some((o) => o.isSeed) || visitStale
+
+  const primary: MessageUiMetric[] = [
+    {
+      label: '信用',
+      value: account.creditLevel || '—',
+      tone: creditTone(account.creditLevel || ''),
+      priority: 'primary',
+    },
+    {
+      label: pipeline ? '开放商机金额' : '开放商机',
+      value: pipeline ? formatMoney(pipeline.total, pipeline.currency) : '0',
+      tone: pipeline && pipeline.total > 0 ? 'accent' : 'neutral',
+      priority: 'primary',
+    },
+  ]
+
+  const secondary: MessageUiMetric[] = [
+    {
+      label: lastVisit ? `近 30 天拜访（截至 ${lastVisit}）` : '近 30 天拜访',
+      value: String(account.visitCount30d ?? 0),
+      tone: (account.visitCount30d ?? 0) >= 3 ? 'good' : 'neutral',
+      priority: 'secondary',
+    },
+    ...(account.npsDelta
+      ? [
+          {
+            label: 'NPS 变化',
+            value: account.npsDelta,
+            tone: npsTone(account.npsDelta),
+            priority: 'secondary' as const,
+          },
+        ]
+      : []),
+    {
+      label: '框架协议',
+      value: account.hasMsa ? '已签' : '未签',
+      tone: account.hasMsa ? 'good' : 'warn',
+      priority: 'secondary',
+    },
+  ]
+
+  const items: MessageUiItem[] = [
+    ...opps.slice(0, 3).map((o) => {
+      const product = [o.productLine, o.productModel].filter(Boolean).join(' ') || o.name
+      const money =
+        Number.isFinite(o.amount) && o.amount > 0
+          ? `${formatMoney(o.amount, o.currencyCode || 'USD')}（预估金额）`
+          : '金额待确认'
+      return {
+        title: product,
+        subtitle: `${o.name} · ${money}`,
+        badge: stageLabel(o.stage),
+        kind: 'opportunity' as const,
+      }
+    }),
+    ...(contact
+      ? [
+          {
+            title: contact.name,
+            subtitle: contact.title || '主要对接人',
+            badge: '联系人',
+            kind: 'contact' as const,
+          },
+        ]
+      : []),
+  ]
+
+  const footnoteParts = [
+    dataAt ? `数据更新于 ${dataAt}` : null,
+    seedish ? '种子演示数据，请核实是否为最新 CRM 状态' : '请以 CRM 实时数据为准',
+  ].filter(Boolean)
+
+  return {
+    type: 'account_pulse',
+    title: account.name,
+    metrics: [...primary, ...secondary],
+    items: items.length ? items : undefined,
+    actions: [
+      {
+        id: 'open_account',
+        label: '查看客户画像',
+      },
+    ],
+    accountKey: account.externalKey || account.id,
+    originLabel: 'CRM 数据',
+    footnote: footnoteParts.join(' · '),
+    hint: normalizeSuggestion(suggestion),
+  }
+}
+
+function shortProfileSummary(
+  account: AccountRecord,
+  focus: ReturnType<typeof detectProfileFocus>,
+  opps: AccountProfileData['opportunities'],
+) {
+  const credit = `信用 ${account.creditLevel || '—'}`
+  const msa = account.hasMsa ? '框架协议已签' : '框架协议未签'
+  const lastVisit = formatDate(account.lastVisitAt)
+  const visits = lastVisit
+    ? `近 30 天 ${account.visitCount30d ?? 0} 次拜访（最近 ${lastVisit}）`
+    : `近 30 天 ${account.visitCount30d ?? 0} 次拜访`
+  const pipeline = openPipelineAmount(opps)
+  const oppLine = pipeline
+    ? `开放商机 ${opps.length} 个，合计 ${formatMoney(pipeline.total, pipeline.currency)}`
+    : '当前无开放商机'
+
+  if (focus === 'credit') return `${account.name}：${credit}，${msa}。`
+  if (focus === 'opportunities') return `${account.name}：${oppLine}，${credit}。`
+  if (focus === 'contacts') return `${account.name}：对接信息如下，${credit}。`
+  if (focus === 'visits') {
+    return `${account.name}：${visits}${account.npsDelta ? `，NPS ${account.npsDelta}` : ''}。`
+  }
+  return `${account.name}：${credit}，${msa}；${visits}；${oppLine}。`
+}
+
+function defaultSuggestion(
+  account: AccountRecord,
+  opps: AccountProfileData['opportunities'],
+  focus: ReturnType<typeof detectProfileFocus>,
+) {
+  // Only emit a cautious next-step when the facts themselves suggest an open Identify opp.
+  if (focus !== 'opportunities' && focus !== 'overview') return undefined
+  const identify = opps.find((o) => o.stage === 'Identify')
+  if (!identify) return undefined
+  const product = [identify.productLine, identify.productModel].filter(Boolean).join(' ')
+  return normalizeSuggestion(
+    `可核对「${product || identify.name}」需求确认与采购窗口；当前仅为识别阶段，信用 ${account.creditLevel || '—'} 不代表可立即推进。`,
+  )
 }
 
 /** Sync heuristic — also used as DeepSeek fallback. Varies by question focus. */
@@ -118,46 +342,14 @@ export async function buildAccountProfileMessage(
   account: AccountRecord,
   utterance?: string,
   profileData?: AccountProfileData,
+  suggestion?: string,
 ): Promise<AgentMessage> {
-  const { facts, sources, opps, contacts } = profileFacts(
-    account,
-    profileData ?? (await loadProfileData(account)),
-  )
+  const data = profileData ?? (await loadProfileData(account))
+  const { sources, opps } = profileFacts(account, data)
   const focus = detectProfileFocus(utterance)
-  const oppText =
-    opps.length === 0
-      ? '当前无开放商机种子'
-      : opps
-          .map(
-            (o) =>
-              `${o.productLine}${o.productModel ? ' ' + o.productModel : ''} · ${o.stage} · 信心度 ${(o.confidenceScore * 100).toFixed(0)}%`,
-          )
-          .join('；')
-  const contactLine = contacts[0]
-    ? `${contacts[0].name}${contacts[0].title ? '（' + contacts[0].title + '）' : ''}`
-    : '暂无联系人种子'
-
-  let content: string
-  switch (focus) {
-    case 'credit':
-      content = `${facts.name} 信用等级 ${facts.creditLevel}${facts.hasMsa ? '，已签 MSA' : '，MSA 状态未标注'}。近 30 天拜访 ${facts.visitCount30d} 次${facts.notes ? `；备注：${facts.notes}` : ''}。若还要看开放商机，可以直接问我。`
-      break
-    case 'opportunities':
-      content = `${facts.name} 当前开放商机：${oppText}。信用 ${facts.creditLevel}，近 30 天 ${facts.visitCount30d} 次拜访——评估推进时可一并参考。`
-      break
-    case 'contacts':
-      content = `${facts.name} 主要对接人：${contactLine}。客户信用 ${facts.creditLevel}${facts.lastVisitAt ? `，上次接触 ${facts.lastVisitAt.slice(0, 10)}` : ''}。`
-      break
-    case 'visits':
-      content = `${facts.name} 近 30 天拜访 ${facts.visitCount30d} 次${facts.lastVisitAt ? `，上次接触 ${facts.lastVisitAt.slice(0, 10)}` : ''}${facts.npsDelta ? `，NPS ${facts.npsDelta}` : ''}。开放商机：${oppText}。`
-      break
-    default:
-      content = [
-        `先说结论：${facts.name} 目前信用 ${facts.creditLevel}${facts.hasMsa ? '（已签 MSA）' : ''}。`,
-        `近 30 天 ${facts.visitCount30d} 次拜访${facts.lastVisitAt ? `，上次 ${facts.lastVisitAt.slice(0, 10)}` : ''}；对接人 ${contactLine}。`,
-        `开放商机：${oppText}${facts.notes ? `。备注：${facts.notes}` : ''}。`,
-      ].join('')
-  }
+  const hint = normalizeSuggestion(suggestion) || defaultSuggestion(account, opps, focus)
+  const ui = buildAccountPulseUi(account, data, hint)
+  const content = shortProfileSummary(account, focus, opps)
 
   return {
     id: `msg_${Math.random().toString(36).slice(2, 10)}`,
@@ -165,9 +357,11 @@ export async function buildAccountProfileMessage(
     agent_name: '客户画像 Agent',
     content,
     sources,
-    confidence: 0.9,
+    // Query replies are CRM facts, not extraction confidence for sales users.
+    confidence: 0,
     agent_chain: ['客户画像 Agent'],
     createdAt: new Date().toISOString(),
+    ui,
   }
 }
 
@@ -189,19 +383,27 @@ export async function synthesizeAccountProfile(
         question: utterance || '客户最近怎么样？',
         focusHint: detectProfileFocus(utterance),
         facts,
-        instruction: '按问题重点组织答案，避免每次输出同一段固定套话。',
+        instruction:
+          'summary 只写已确认事实；suggestion 为空或以「AI 建议，待核实：」开头；禁止写出赢单率/confidenceScore。',
       }),
-      temperature: 0.4,
+      temperature: 0.3,
       schema: accountProfileOutputSchema,
     })
     if (!output.summary.trim()) return { message: fallback, mode: 'heuristic' }
+    const hint = normalizeSuggestion(output.suggestion) || fallback.ui?.hint
     return {
       mode,
       message: {
         ...fallback,
         content: output.summary.trim(),
-        confidence: clamp(output.confidence ?? 0.88),
+        confidence: 0,
         sources,
+        ui: fallback.ui
+          ? {
+              ...fallback.ui,
+              hint,
+            }
+          : fallback.ui,
       },
     }
   } catch {
@@ -215,7 +417,7 @@ export async function queryAccountProfileWithTools(
   knownAccountId?: string,
 ): Promise<{ account: AccountRecord; message: AgentMessage; mode: 'deepseek' }> {
   const { finalText, toolResults } = await chatWithTools({
-    system: `${ACCOUNT_PROFILE_SYSTEM}\n\n先使用工具查询客户事实，再基于工具结果回答。有已知客户 ID 时直接调用 get_account_profile；否则先调用 search_accounts，再用匹配项 ID 调用 get_account_profile。只输出 JSON：{"summary":"...","confidence":0到1,"emphasis":"credit|visits|opportunities|contacts|overview"}。工具未返回的数据不得推测。`,
+    system: `${ACCOUNT_PROFILE_SYSTEM}\n\n先使用工具查询客户事实，再基于工具结果回答。有已知客户 ID 时直接调用 get_account_profile；否则先调用 search_accounts，再用匹配项 ID 调用 get_account_profile。只输出 JSON：{"summary":"...","suggestion":"AI 建议，待核实：…或空字符串","confidence":0到1,"emphasis":"credit|visits|opportunities|contacts|overview"}。工具未返回的数据不得推测；不要输出赢单率百分比。`,
     user: JSON.stringify({ question: utterance, knownAccountId }),
     tools: accountQueryTools,
     temperature: 0.2,
@@ -229,19 +431,26 @@ export async function queryAccountProfileWithTools(
     contacts: profile.contacts,
     opportunities: profile.opportunities,
   }
-  const fallback = await buildAccountProfileMessage(account, utterance, profileData)
   const output = parseStructuredJson(finalText, accountProfileOutputSchema)
+  const fallback = await buildAccountProfileMessage(
+    account,
+    utterance,
+    profileData,
+    output.suggestion,
+  )
   return {
     account,
     mode: 'deepseek',
     message: {
       ...fallback,
-      content: output.summary,
-      confidence: clamp(output.confidence ?? fallback.confidence),
+      content: output.summary?.trim() || fallback.content,
+      confidence: 0,
+      ui: fallback.ui
+        ? {
+            ...fallback.ui,
+            hint: normalizeSuggestion(output.suggestion) || fallback.ui.hint,
+          }
+        : fallback.ui,
     },
   }
-}
-
-function clamp(n: number) {
-  return Math.max(0, Math.min(1, n))
 }

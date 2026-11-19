@@ -22,6 +22,8 @@ export const extractVisitOutputSchema = z.object({
 
 export const accountProfileOutputSchema = z.object({
   summary: z.string().min(1),
+  /** Must be empty or start with 「AI 建议，待核实：」 — never mix into facts. */
+  suggestion: z.string().optional(),
   confidence,
   emphasis: z.enum(['credit', 'visits', 'opportunities', 'contacts', 'overview']).optional(),
 })

@@ -4,7 +4,12 @@ import {
   parseStructuredJson,
 } from '../llm/deepseek.js'
 import { orderQueryOutputSchema } from '../llm/schemas.js'
-import type { AccountRecord, AgentMessage, SourceRef } from '../types.js'
+import type {
+  AccountRecord,
+  AgentMessage,
+  MessageUiBlock,
+  SourceRef,
+} from '../types.js'
 import {
   getAccount,
   getOrderLogistics,
@@ -79,22 +84,69 @@ function messageFromFacts(utterance: string, facts: OrderFacts): AgentMessage {
     const askAmount = /金额|多少钱|费用|amount/i.test(utterance)
     if (askEta) {
       content = facts.shipment
-        ? `${facts.account.name}「${latest.name}」物流目前是 ${facts.shipment.status}，运单 ${facts.shipment.trackingNo}，ETA ${facts.shipment.eta}。订单本身状态为 ${latest.status}（下单 ${latest.orderedAt}）。`
-        : `${facts.account.name}「${latest.name}」订单状态 ${latest.status}，但暂无物流明细可查。可补充运单号后再问我。`
+        ? `${facts.account.name}「${latest.name}」物流 ${facts.shipment.status}，ETA ${facts.shipment.eta}。`
+        : `${facts.account.name}「${latest.name}」暂无物流明细。`
     } else if (askAmount) {
-      content = `${facts.account.name} 最近订单「${latest.name}」金额 ${latest.currencyCode} ${latest.amount.toLocaleString()}，状态 ${latest.status}，下单日 ${latest.orderedAt}${
-        facts.shipment ? `；物流 ${facts.shipment.status}（ETA ${facts.shipment.eta}）` : '；暂无物流明细'
-      }。`
+      content = `${facts.account.name} 最近订单金额 ${latest.currencyCode} ${latest.amount.toLocaleString()}，状态 ${latest.status}。`
     } else {
-      content = [
-        `${facts.account.name} 最近一笔是「${latest.name}」，状态 ${latest.status}。`,
-        `下单 ${latest.orderedAt}，金额 ${latest.currencyCode} ${latest.amount.toLocaleString()}。`,
-        facts.shipment
-          ? `物流侧：${facts.shipment.status} · 运单 ${facts.shipment.trackingNo} · ETA ${facts.shipment.eta}。`
-          : '当前没有关联物流记录。',
-      ].join('')
+      content = `${facts.account.name} 最近订单「${latest.name}」，状态 ${latest.status}。`
     }
   }
+
+  const ui: MessageUiBlock | undefined = latest
+    ? {
+        type: 'order_status',
+        title: facts.account.name,
+        metrics: [
+          {
+            label: '金额',
+            value: `${latest.currencyCode} ${latest.amount.toLocaleString()}`,
+            tone: 'accent',
+          },
+          {
+            label: '订单状态',
+            value: latest.status,
+            tone: 'neutral',
+          },
+          ...(facts.shipment
+            ? [
+                {
+                  label: '物流',
+                  value: facts.shipment.status,
+                  tone: 'good' as const,
+                },
+                {
+                  label: 'ETA',
+                  value: facts.shipment.eta,
+                  tone: 'neutral' as const,
+                },
+              ]
+            : [
+                {
+                  label: '下单日',
+                  value: latest.orderedAt,
+                  tone: 'neutral' as const,
+                },
+              ]),
+        ],
+        items: [
+          {
+            title: latest.name,
+            subtitle: facts.shipment
+              ? `运单 ${facts.shipment.trackingNo}`
+              : `下单 ${latest.orderedAt}`,
+            badge: latest.status,
+          },
+        ],
+        actions: [
+          {
+            id: 'open_account',
+            label: '查看客户画像',
+          },
+        ],
+        accountKey: facts.account.externalKey || facts.account.id,
+      }
+    : undefined
 
   return {
     id: `msg_${Math.random().toString(36).slice(2, 10)}`,
@@ -105,6 +157,7 @@ function messageFromFacts(utterance: string, facts: OrderFacts): AgentMessage {
     confidence: latest ? 0.88 : 0.7,
     agent_chain: ['Orchestrator', '订单查询 Agent'],
     createdAt: new Date().toISOString(),
+    ui,
   }
 }
 

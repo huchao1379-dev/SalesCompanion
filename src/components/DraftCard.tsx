@@ -67,6 +67,8 @@ function FieldMark({ missing, lowConfidence }: { missing?: boolean; lowConfidenc
 type Props = {
   draft: DraftPayload
   busy?: boolean
+  /** Hide account/visit source chips under the form (chat thread prefers a cleaner footer). */
+  hideSources?: boolean
   /** Existing open opportunities for duplicate detection (opportunity drafts). */
   openOpportunityNames?: string[]
   onChange: (next: DraftPayload) => void
@@ -91,6 +93,7 @@ function findDuplicateHint(draft: OpportunityDraftPayload, openNames: string[]) 
 export function DraftCard({
   draft,
   busy,
+  hideSources = false,
   openOpportunityNames = [],
   onChange,
   onConfirm,
@@ -385,7 +388,7 @@ export function DraftCard({
         </div>
       )}
 
-      <SourceChips sources={draft.sources} />
+      {!hideSources ? <SourceChips sources={draft.sources} /> : null}
 
       {draft.syncError ? <p className="draft-card__error">{draft.syncError}</p> : null}
       {draft.sapExternalId ? (

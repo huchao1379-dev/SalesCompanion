@@ -36,7 +36,7 @@ export function AppShell() {
   const [seedDrafts, setSeedDrafts] = useState<DraftPayload[]>([])
   const [accountKey, setAccountKey] = useState<string>('SAP-ACC-RENJI')
   const [opportunityId, setOpportunityId] = useState<string | null>(null)
-  const [insightsOpen, setInsightsOpen] = useState(true)
+  const [insightsOpen, setInsightsOpen] = useState(false)
   const [copilotDraft, setCopilotDraft] = useState('')
   const [chatSeed, setChatSeed] = useState('')
   const [chatKey, setChatKey] = useState(0)
@@ -100,6 +100,7 @@ export function AppShell() {
         <HomeDashboard
           dimmed={insightsOpen}
           onOpenBrief={() => {
+            // Unlock inside the tap so autoplay on open is allowed by the browser.
             unlockSpeech()
             setInsightsOpen(true)
           }}

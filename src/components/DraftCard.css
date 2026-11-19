@@ -7,7 +7,15 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: var(--space-4);
+  padding-bottom: calc(var(--space-4) + 0.15rem);
   box-shadow: var(--shadow-soft);
+  box-sizing: border-box;
+  /* Stay in normal document flow — never overlay the message thread. */
+  float: none;
+  clear: both;
+  margin: 0;
+  transform: none;
+  inset: auto;
 }
 
 .draft-card--opportunity {
@@ -20,14 +28,18 @@
 
 .draft-card__ribbon {
   position: absolute;
-  top: 0.75rem;
-  right: -1.6rem;
+  top: 0.7rem;
+  right: -1.85rem;
+  z-index: 1;
   transform: rotate(35deg);
   background: var(--green);
   color: #052e16;
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 800;
-  padding: 0.15rem 2rem;
+  padding: 0.14rem 2.1rem;
+  pointer-events: none;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .draft-card__header,
@@ -38,11 +50,19 @@
   align-items: flex-start;
 }
 
+.draft-card__header {
+  position: relative;
+  z-index: 1;
+  padding-right: 3.25rem;
+  min-width: 0;
+}
+
 .draft-card__heading {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
   min-width: 0;
+  flex: 1;
 }
 
 .draft-card__kind {
@@ -68,6 +88,15 @@
 .draft-card__meta {
   flex-direction: column;
   align-items: flex-end;
+  gap: 0.25rem;
+  flex-shrink: 0;
+  max-width: 42%;
+  text-align: right;
+}
+
+.draft-card__meta .confidence {
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .draft-card__body {
@@ -214,12 +243,22 @@
   flex-wrap: wrap;
   gap: var(--space-3);
   align-items: center;
+  margin-top: var(--space-4);
+  padding-top: 0.15rem;
+  position: relative;
+  z-index: 1;
+}
+
+.draft-card__actions .btn {
+  min-height: 40px;
 }
 
 .draft-list {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  width: 100%;
+  min-width: 0;
 }
 
 @media (max-width: 380px) {

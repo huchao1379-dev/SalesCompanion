@@ -36,18 +36,14 @@ type Props = {
   onOpenActivity: (item: AgendaItem) => void
 }
 
-function pad(n: number) {
-  return String(n).padStart(2, '0')
-}
-
 function formatClock(now: Date) {
-  let h = now.getHours()
-  const m = now.getMinutes()
-  const s = now.getSeconds()
-  const ampm = h >= 12 ? 'PM' : 'AM'
-  h = h % 12
-  if (h === 0) h = 12
-  return `${pad(h)}:${pad(m)}:${pad(s)} ${ampm}`
+  // Always 24-hour (e.g. 13:27:05), never 01:27:05 PM.
+  return now.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
 }
 
 function formatDateLabel(now: Date) {

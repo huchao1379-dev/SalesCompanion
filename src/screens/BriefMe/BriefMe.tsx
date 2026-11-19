@@ -7,7 +7,14 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { IconBulb, IconClose, IconRefresh, IconSpark } from '../../components/DashIcons'
+import {
+  IconBulb,
+  IconClose,
+  IconPlay,
+  IconRefresh,
+  IconSpark,
+  IconStop,
+} from '../../components/DashIcons'
 import { SheetScrim } from '../../components/SheetScrim'
 import { buildBriefChapters, type BriefChapter } from '../../data/brief'
 import { listDrafts } from '../../data/dataverse'
@@ -20,7 +27,9 @@ type Props = {
 }
 
 const PAGE_COUNT = 4
-const SWIPE_THRESHOLD = 56
+const SWIPE_THRESHOLD = 48
+/** Ignore end-of-speech auto-advance when utterance dies almost immediately (blocked/failed TTS). */
+const MIN_PLAY_MS_BEFORE_ADVANCE = 700
 
 const DEFAULT_INSIGHT = {
   label: 'Performance Analysis',
@@ -50,10 +59,16 @@ export function BriefMe({ open, onClose }: Props) {
 
   const pageRef = useRef(0)
   const speakGen = useRef(0)
+  const playlistRef = useRef(false)
+  /** Armed by open / refresh / play; allows playlist auto-advance. */
+  const userArmedPlayRef = useRef(false)
+  const speakStartedAt = useRef(0)
   const dragY = useRef(0)
   const startY = useRef(0)
   const sheetRef = useRef<HTMLElement | null>(null)
+  const carouselRef = useRef<HTMLDivElement | null>(null)
   const swipeStartX = useRef(0)
+  const swipeStartY = useRef(0)
   const swipeDeltaX = useRef(0)
   const swipeActive = useRef(false)
   const pagesRef = useRef<BriefChapter[]>([])
@@ -86,6 +101,7 @@ export function BriefMe({ open, onClose }: Props) {
   useEffect(() => {
     return () => {
       speakGen.current += 1
+      playlistRef.current = false
       cancelSpeech()
     }
   }, [])
@@ -98,21 +114,37 @@ export function BriefMe({ open, onClose }: Props) {
 
   const stopSpeak = useCallback(() => {
     speakGen.current += 1
+    playlistRef.current = false
+    userArmedPlayRef.current = false
     cancelSpeech()
     setPlaying(false)
   }, [])
 
-  const speakPage = useCallback((index: number, fromUserGesture = false) => {
+  const speakPage = useCallback((index: number, opts?: { fromUserGesture?: boolean; playlist?: boolean }) => {
+    const fromUserGesture = opts?.fromUserGesture ?? false
+    const playlist = opts?.playlist ?? false
     const current = pagesRef.current[index]
     if (!current || !window.speechSynthesis) {
+      playlistRef.current = false
       setPlaying(false)
       return
     }
 
-    if (fromUserGesture) unlockSpeech()
+    if (fromUserGesture) {
+      userArmedPlayRef.current = true
+      unlockSpeech()
+    } else if (!userArmedPlayRef.current) {
+      // Playlist continuation is allowed only after open/refresh/play armed TTS.
+      playlistRef.current = false
+      setPlaying(false)
+      return
+    }
+
+    playlistRef.current = playlist
 
     speakGen.current += 1
     const gen = speakGen.current
+    speakStartedAt.current = Date.now()
 
     const insight = chapterToInsight(current, index)
     const text = [insight.headline, insight.body].join('。')
@@ -125,32 +157,46 @@ export function BriefMe({ open, onClose }: Props) {
       rate: 1,
       onEnd: () => {
         if (gen !== speakGen.current) return
+        const livedMs = Date.now() - speakStartedAt.current
+        // Ignore instant end (blocked TTS) so we don't cascade 0→1→2→3.
+        const canAdvance =
+          playlistRef.current &&
+          userArmedPlayRef.current &&
+          livedMs >= MIN_PLAY_MS_BEFORE_ADVANCE
         const next = index + 1
-        if (next < pagesRef.current.length) {
+        if (canAdvance && next < pagesRef.current.length) {
           pageRef.current = next
           setPage(next)
           setElapsed(0)
-          speakPage(next, false)
-        } else {
-          setPlaying(false)
+          speakPage(next, { fromUserGesture: false, playlist: true })
+          return
         }
+        playlistRef.current = false
+        setPlaying(false)
       },
       onError: () => {
         if (gen !== speakGen.current) return
+        playlistRef.current = false
         setPlaying(false)
       },
     })
   }, [])
 
   const goToPage = useCallback(
-    (index: number, autoPlay = true) => {
+    (index: number, opts?: { play?: boolean; playlist?: boolean }) => {
       const next = Math.max(0, Math.min(pagesRef.current.length - 1, index))
       pageRef.current = next
       setPage(next)
       setDragX(0)
       setElapsed(0)
-      if (autoPlay) speakPage(next, true)
-      else stopSpeak()
+      if (opts?.play) {
+        speakPage(next, {
+          fromUserGesture: true,
+          playlist: opts.playlist ?? true,
+        })
+      } else {
+        stopSpeak()
+      }
     },
     [speakPage, stopSpeak],
   )
@@ -161,18 +207,21 @@ export function BriefMe({ open, onClose }: Props) {
       setDragX(0)
       return
     }
+    // Open → land on first card and autoplay through the playlist.
     pageRef.current = 0
     setPage(0)
     setElapsed(0)
-    // Autoplay often blocked on Android Chrome without a fresh gesture;
-    // still attempt (works on iOS). Manual play button remains the fallback.
-    speakPage(0, false)
+    setDragX(0)
+    const t = window.setTimeout(() => {
+      speakPage(0, { fromUserGesture: true, playlist: true })
+    }, 80)
+    return () => window.clearTimeout(t)
   }, [open, speakPage, stopSpeak])
 
   function refresh() {
-    unlockSpeech()
     setChapters(buildBriefChapters(listDrafts()))
-    speakPage(pageRef.current, true)
+    // Refresh → restart from the first card and autoplay.
+    goToPage(0, { play: true, playlist: true })
   }
 
   function onPointerDown(e: ReactPointerEvent<HTMLElement>) {
@@ -200,23 +249,41 @@ export function BriefMe({ open, onClose }: Props) {
   }
 
   function onSwipeDown(e: ReactPointerEvent<HTMLDivElement>) {
+    if (e.button != null && e.button !== 0) return
     swipeActive.current = true
     swipeStartX.current = e.clientX
+    swipeStartY.current = e.clientY
     swipeDeltaX.current = 0
-    e.currentTarget.setPointerCapture(e.pointerId)
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {
+      // Some hosts reject capture; still track via move/up on the element.
+    }
   }
 
   function onSwipeMove(e: ReactPointerEvent<HTMLDivElement>) {
-    if (!swipeActive.current || !e.currentTarget.hasPointerCapture(e.pointerId)) return
-    swipeDeltaX.current = e.clientX - swipeStartX.current
-    setDragX(swipeDeltaX.current)
+    if (!swipeActive.current) return
+    const dx = e.clientX - swipeStartX.current
+    const dy = e.clientY - swipeStartY.current
+    // Prefer horizontal intent; ignore mostly-vertical drags (sheet dismiss lives on grab).
+    if (Math.abs(dy) > Math.abs(dx) + 12 && Math.abs(dx) < SWIPE_THRESHOLD) {
+      setDragX(0)
+      swipeDeltaX.current = 0
+      return
+    }
+    swipeDeltaX.current = dx
+    setDragX(dx)
   }
 
   function onSwipeUp(e: ReactPointerEvent<HTMLDivElement>) {
     if (!swipeActive.current) return
     swipeActive.current = false
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId)
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId)
+      } catch {
+        // ignore
+      }
     }
 
     const delta = swipeDeltaX.current
@@ -224,12 +291,11 @@ export function BriefMe({ open, onClose }: Props) {
     setDragX(0)
 
     if (delta <= -SWIPE_THRESHOLD && pageRef.current < pagesRef.current.length - 1) {
-      goToPage(pageRef.current + 1, true)
+      goToPage(pageRef.current + 1)
       return
     }
     if (delta >= SWIPE_THRESHOLD && pageRef.current > 0) {
-      goToPage(pageRef.current - 1, true)
-      return
+      goToPage(pageRef.current - 1)
     }
   }
 
@@ -237,6 +303,7 @@ export function BriefMe({ open, onClose }: Props) {
 
   const paragraphLabel = `Paragraph ${page + 1}/${pages.length}`
   const timeLabel = `0:${String(Math.min(elapsed, 59)).padStart(2, '0')}`
+  const slidePct = -page * (100 / PAGE_COUNT)
 
   return (
     <div className="sheet-root" role="presentation">
@@ -286,12 +353,17 @@ export function BriefMe({ open, onClose }: Props) {
               type="button"
               className={`sheet-icon-btn sheet-icon-btn--ok${playing ? ' is-playing' : ''}`}
               aria-label={playing ? '停止播报' : '播放今日播报'}
+              title={playing ? '停止播报' : '点击播放今日播报'}
               onClick={() => {
-                if (playing) stopSpeak()
-                else speakPage(pageRef.current, true)
+                if (playing) {
+                  stopSpeak()
+                  return
+                }
+                // Only start TTS from an explicit user tap — never on sheet open.
+                speakPage(pageRef.current, { fromUserGesture: true, playlist: true })
               }}
             >
-              <span className="sheet-icon-btn__stop" />
+              {playing ? <IconStop /> : <IconPlay />}
             </button>
             <button
               type="button"
@@ -308,6 +380,7 @@ export function BriefMe({ open, onClose }: Props) {
         </div>
 
         <div
+          ref={carouselRef}
           className="insights-carousel"
           onPointerDown={onSwipeDown}
           onPointerMove={onSwipeMove}
@@ -317,7 +390,8 @@ export function BriefMe({ open, onClose }: Props) {
           <div
             className="insights-carousel__track"
             style={{
-              transform: `translateX(calc(${-page * 100}% + ${dragX}px))`,
+              width: `${PAGE_COUNT * 100}%`,
+              transform: `translateX(calc(${slidePct}% + ${dragX}px))`,
               transition: dragX === 0 ? 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
             }}
           >
@@ -348,7 +422,7 @@ export function BriefMe({ open, onClose }: Props) {
                 role="tab"
                 aria-selected={i === page}
                 className={i === page ? 'insights-dot is-active' : 'insights-dot'}
-                onClick={() => goToPage(i, true)}
+                onClick={() => goToPage(i)}
               />
             ))}
           </div>

@@ -131,6 +131,11 @@
   touch-action: none;
   cursor: grab;
   user-select: none;
+  -webkit-user-select: none;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  position: relative;
 }
 
 .insights-carousel:active {
@@ -139,8 +144,9 @@
 
 .insights-carousel__track {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   will-change: transform;
+  min-width: 0;
 }
 
 .insight-card {
@@ -150,12 +156,14 @@
   background: var(--surface-muted);
   border-radius: var(--radius);
   padding: var(--space-4);
-  flex: 0 0 100%;
-  width: 100%;
+  flex: 0 0 25%;
+  width: 25%;
+  max-width: 25%;
   height: auto;
   min-height: 0;
   max-height: none;
   box-sizing: border-box;
+  pointer-events: none;
 }
 
 .insight-card__icon {

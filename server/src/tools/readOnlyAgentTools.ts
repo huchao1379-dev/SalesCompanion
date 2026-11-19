@@ -63,7 +63,11 @@ const getAccountProfile: ChatTool = {
         productLine: opportunity.productLine,
         productModel: opportunity.productModel,
         stage: opportunity.stage,
-        confidenceScore: opportunity.confidenceScore,
+        amount: opportunity.amount,
+        currencyCode: opportunity.currencyCode,
+        updatedAt: opportunity.updatedAt,
+        createdAt: opportunity.createdAt,
+        isSeed: opportunity.isSeed ?? true,
       })),
     }
   },
@@ -124,7 +128,11 @@ export const accountProfileToolResultSchema = z.object({
     productLine: z.string(),
     productModel: z.string().optional(),
     stage: z.string(),
-    confidenceScore: z.number(),
+    amount: z.number(),
+    currencyCode: z.string(),
+    updatedAt: z.string().optional(),
+    createdAt: z.string().optional(),
+    isSeed: z.boolean().optional(),
   })),
 })
 

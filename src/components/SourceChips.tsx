@@ -8,12 +8,11 @@ type Props = {
 export function SourceChips({ sources }: Props) {
   if (!sources.length) return null
   return (
-    <div className="source-chips" aria-label="来源">
-      <span className="source-chips__title">来源</span>
+    <div className="source-chips" aria-label="信息来源">
       {sources.map((s) => (
         <span
           key={`${s.kind}-${s.label}-${s.ref ?? ''}-${s.id ?? ''}`}
-          className="source-chip"
+          className={`source-chip source-chip--${s.kind}`}
           title={[s.entity, s.id || s.ref].filter(Boolean).join(' · ')}
         >
           {s.label}

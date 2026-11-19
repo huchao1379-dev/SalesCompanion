@@ -1,5 +1,5 @@
 import './CopilotChat.css'
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { ApiRequestError } from '../../api/client'
 import type {
   AgentMessage,
@@ -16,7 +16,7 @@ import {
   IconSendUp,
   IconStop,
 } from '../../components/DashIcons'
-import { SourceChips } from '../../components/SourceChips'
+import { MessageUiCard } from '../../components/MessageUiCard'
 import {
   appendMessages,
   clearConversation,
@@ -128,10 +128,68 @@ function shouldShowTimestamp(messages: AgentMessage[], index: number) {
   return Math.abs(b - a) > TIME_GROUP_MS
 }
 
+function mergeSources(a: AgentMessage['sources'] = [], b: AgentMessage['sources'] = []) {
+  const out = [...a]
+  for (const s of b) {
+    if (
+      !out.some(
+        (x) => x.kind === s.kind && x.label === s.label && (x.ref || '') === (s.ref || ''),
+      )
+    ) {
+      out.push(s)
+    }
+  }
+  return out
+}
+
+function mergeAgentChains(a?: string[], b?: string[]) {
+  const out: string[] = []
+  for (const step of [...(a || []), ...(b || [])]) {
+    const t = step.trim()
+    if (t && !out.includes(t)) out.push(t)
+  }
+  return out.length ? out : undefined
+}
+
+/** Collapse same-turn assistant spam (orchestrator + step agents) into one bubble. */
 function dedupeAssistantMessages(messages: AgentMessage[]): AgentMessage[] {
   const out: AgentMessage[] = []
   for (const m of messages) {
     const prev = out[out.length - 1]
+    const sameTurnAssistant =
+      prev &&
+      m.role !== 'user' &&
+      prev.role !== 'user' &&
+      prev.deliveryStatus !== 'pending' &&
+      m.deliveryStatus !== 'pending'
+
+    if (sameTurnAssistant) {
+      const prevText = prev.content.trim()
+      const nextText = m.content.trim()
+      const identical = prevText.length > 0 && prevText === nextText
+      const nextIsDraftEcho =
+        Boolean(m.draft) &&
+        nextText.length > 0 &&
+        (prevText.includes(nextText) || nextText.length < 80)
+
+      if (identical || nextIsDraftEcho || Boolean(m.draft)) {
+        const mergedContent =
+          identical || nextIsDraftEcho || prevText.includes(nextText)
+            ? prev.content
+            : [prev.content, m.content].filter((t) => t.trim()).join('\n\n')
+        out[out.length - 1] = {
+          ...prev,
+          content: mergedContent,
+          sources: mergeSources(prev.sources, m.sources),
+          agent_chain: mergeAgentChains(prev.agent_chain, m.agent_chain || [m.agent_name]),
+          confidence: Math.max(prev.confidence || 0, m.confidence || 0),
+          agent_name: prev.agent_name || m.agent_name,
+          ui: prev.ui || m.ui,
+        }
+        continue
+      }
+    }
+
     if (
       prev &&
       m.role !== 'user' &&
@@ -141,9 +199,10 @@ function dedupeAssistantMessages(messages: AgentMessage[]): AgentMessage[] {
     ) {
       out[out.length - 1] = {
         ...prev,
-        sources: prev.sources.length ? prev.sources : m.sources,
-        agent_chain: prev.agent_chain?.length ? prev.agent_chain : m.agent_chain,
+        sources: mergeSources(prev.sources, m.sources),
+        agent_chain: mergeAgentChains(prev.agent_chain, m.agent_chain),
         confidence: Math.max(prev.confidence, m.confidence),
+        ui: prev.ui || m.ui,
       }
       continue
     }
@@ -161,10 +220,26 @@ function normalizeAssistantMessages(messages: AgentMessage[], completedAt: strin
   }))
 }
 
+function isAssistantTurnStart(messages: AgentMessage[], index: number) {
+  if (messages[index]?.role === 'user') return false
+  if (index === 0) return true
+  return messages[index - 1]?.role === 'user'
+}
+
+function isAssistantTurnEnd(messages: AgentMessage[], index: number) {
+  if (messages[index]?.role === 'user') return false
+  const next = messages[index + 1]
+  return !next || next.role === 'user'
+}
+
 function messageOriginLabel(m: AgentMessage) {
   if (m.role === 'user') return '你'
+  // Prefer business provenance over internal agent names for sales users.
+  if (m.ui?.originLabel?.trim()) return m.ui.originLabel.trim()
+  if (m.ui?.type === 'account_pulse' || m.ui?.type === 'order_status') return 'CRM 数据'
   const name = m.agent_name?.trim()
-  if (name && !/^you$/i.test(name)) return name
+  if (name && !/^you$/i.test(name) && !/Agent$/i.test(name)) return name
+  if (name && /画像|订单|总结/.test(name)) return 'CRM 数据'
   const steps = footprintSteps(m)
   if (steps.length) return steps.join(' · ')
   return BOT_NAME
@@ -204,15 +279,27 @@ function failureLabel(kind?: MessageFailureKind) {
   return '请求失败'
 }
 
-function hasExplainableConfidence(m: AgentMessage) {
-  if (!(m.confidence > 0) || !m.sources?.length) return false
-  return m.sources.some((s) => s.kind === 'dataverse' || s.kind === 'sap')
+/** Only show "提取置信" after visit-field extraction that needs human review. */
+function shouldShowExtractionConfidence(m: AgentMessage) {
+  if (!(m.confidence > 0)) return false
+  if (m.ui?.type === 'account_pulse' || m.ui?.type === 'order_status') return false
+  if (/画像|订单|总结|Orchestrator/i.test(m.agent_name || '')) return false
+  // Draft-bearing replies are the visit-capture extraction path.
+  if (m.draft) return true
+  const chain = m.agent_chain || []
+  return chain.some((c) => /EntityExtract|活动创建|商机创建|实体抽取/i.test(c))
 }
 
 function footprintSteps(m: AgentMessage) {
   const chain = (m.agent_chain || []).filter(Boolean)
   const unique = [...new Set(chain.map((c) => c.trim()).filter(Boolean))]
-  return unique.filter((c) => !/^orchestrator$/i.test(c) && c !== BOT_NAME)
+  return unique.filter(
+    (c) =>
+      !/^orchestrator$/i.test(c) &&
+      c !== BOT_NAME &&
+      c !== m.agent_name &&
+      !/Agent$/i.test(c),
+  )
 }
 
 export function CopilotChat(props: Props) {
@@ -230,9 +317,11 @@ function NativeChat({
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
+  const draftsStartRef = useRef<HTMLDivElement | null>(null)
   const stickToBottomRef = useRef(true)
   const genRef = useRef<GenerationHandle | null>(null)
   const genSeqRef = useRef(0)
+  const prevDraftCountRef = useRef(0)
   const [input, setInput] = useState(initialPrompt)
   const [conversation, setConversation] = useState<ConversationState>(() => loadConversation())
   const conversationRef = useRef(conversation)
@@ -243,7 +332,10 @@ function NativeChat({
   const [showNewMsgHint, setShowNewMsgHint] = useState(false)
   const [clearArmed, setClearArmed] = useState(false)
 
-  const messages = conversation.messages
+  const messages = useMemo(
+    () => dedupeAssistantMessages(conversation.messages),
+    [conversation.messages],
+  )
   const isEmpty = messages.length === 0
   const hasSendable = Boolean(input.trim() || attachments.length)
   const canSend = hasSendable && !busy && !generating
@@ -280,12 +372,32 @@ function NativeChat({
   useEffect(() => {
     const el = bodyRef.current
     if (!el) return
+
+    const draftCount = drafts.length
+    const draftsJustAppeared = draftCount > prevDraftCountRef.current
+    prevDraftCountRef.current = draftCount
+
     if (!stickToBottomRef.current) {
       setShowNewMsgHint(true)
       return
     }
-    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-    setShowNewMsgHint(false)
+
+    // When drafts arrive, pin the draft block under the last message instead of
+    // jumping to the card bottom (which made the tall card look like it covered chat).
+    const run = () => {
+      if (draftsJustAppeared && draftsStartRef.current) {
+        draftsStartRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      } else {
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+      }
+      setShowNewMsgHint(false)
+    }
+
+    // Wait a frame so draft layout height is committed before scrolling.
+    const id = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(run)
+    })
+    return () => window.cancelAnimationFrame(id)
   }, [messages, drafts, generating])
 
   function onBodyScroll() {
@@ -678,7 +790,7 @@ function NativeChat({
         onScroll={onBodyScroll}
         aria-live="polite"
       >
-        {isEmpty ? (
+        {isEmpty && drafts.length === 0 ? (
           <div className="chat-empty">
             <div className="chat-empty__help">
               <h2>我可以帮你</h2>
@@ -696,168 +808,214 @@ function NativeChat({
             <p className="chat-empty__hint">输入问题，或按住麦克风开始。Enter 发送，Shift+Enter 换行。</p>
           </div>
         ) : (
-          <div className="chat__thread">
-            {messages.map((m, index) => {
-              const isUser = m.role === 'user'
-              const showTime = shouldShowTimestamp(messages, index)
-              const steps = !isUser ? footprintSteps(m) : []
-              const pending = m.deliveryStatus === 'pending'
-              const stopped = m.deliveryStatus === 'stopped'
-              const errored = m.deliveryStatus === 'error'
-              const showDataSources = !isUser && !pending && !errored && m.sources?.length > 0
-              const showConfidence = !isUser && !pending && hasExplainableConfidence(m)
-              const originLabel = messageOriginLabel(m)
-              const timeLabel = pending
-                ? '正在回复'
-                : isUser
-                  ? formatMessageTime(m.createdAt)
-                  : stopped
-                    ? `已停止 · ${formatMessageTime(m.completedAt || m.createdAt)}`
-                    : formatMessageTime(m.completedAt || m.createdAt)
-              const showTimeRow = showTime || pending
+          <div className="chat-screen__feed">
+            {!isEmpty ? (
+              <div className="chat__thread" role="log" aria-relevant="additions">
+                {messages.map((m, index) => {
+                  const isUser = m.role === 'user'
+                  const showTime = shouldShowTimestamp(messages, index)
+                  const steps = !isUser ? footprintSteps(m) : []
+                  const pending = m.deliveryStatus === 'pending'
+                  const stopped = m.deliveryStatus === 'stopped'
+                  const errored = m.deliveryStatus === 'error'
+                  const turnStart = !isUser && isAssistantTurnStart(messages, index)
+                  const turnEnd = !isUser && isAssistantTurnEnd(messages, index)
+                  const hasUiCard = Boolean(!isUser && !pending && !errored && m.ui)
+                  const uiHasAccountAction = Boolean(
+                    m.ui?.actions?.some((a) => a.id === 'open_account'),
+                  )
+                  const showConfidence =
+                    !isUser && turnEnd && !pending && shouldShowExtractionConfidence(m)
+                  const showAccountLink =
+                    Boolean(accountKey && onOpenAccount) &&
+                    !isUser &&
+                    turnEnd &&
+                    !pending &&
+                    !errored &&
+                    !uiHasAccountAction
+                  const originLabel = messageOriginLabel(m)
+                  const showSteps =
+                    !isUser &&
+                    turnEnd &&
+                    !pending &&
+                    !m.ui &&
+                    steps.length > 1
+                  const timeLabel = pending
+                    ? '正在回复'
+                    : isUser
+                      ? formatMessageTime(m.createdAt)
+                      : stopped
+                        ? `已停止 · ${formatMessageTime(m.completedAt || m.createdAt)}`
+                        : formatMessageTime(m.completedAt || m.createdAt)
+                  const showTimeRow = showTime || pending
+                  const showOrigin = !isUser && (turnEnd || pending || errored || stopped)
 
-              return (
-                <div
-                  key={m.id}
-                  className={`chat-row chat-row--${isUser ? 'user' : 'assistant'}`}
-                >
-                  {!isUser ? (
-                    <div className="chat-row__identity">
-                      <span className="chat-row__bot-name">{BOT_NAME}</span>
-                      {pending ? (
-                        <span className="chat-row__live" aria-live="polite">
-                          正在回复
-                        </span>
+                  return (
+                    <div
+                      key={m.id}
+                      className={`chat-row chat-row--${isUser ? 'user' : 'assistant'}${turnStart ? ' is-turn-start' : ''}${turnEnd ? ' is-turn-end' : ''}`}
+                    >
+                      {turnStart ? (
+                        <div className="chat-row__identity">
+                          <span className="chat-row__bot-name">{BOT_NAME}</span>
+                          {pending ? (
+                            <span className="chat-row__live" aria-live="polite">
+                              正在回复
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      <article
+                        className={[
+                          'chat-bubble',
+                          `chat-bubble--${isUser ? 'user' : 'assistant'}`,
+                          pending ? 'is-pending' : '',
+                          stopped ? 'is-stopped' : '',
+                          errored ? 'is-error' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                      >
+                        {pending ? (
+                          <div className="chat-progress" role="status">
+                            <span className="chat-progress__dot" aria-hidden />
+                            <span>{m.progressLabel || '正在处理'}</span>
+                          </div>
+                        ) : null}
+
+                        {m.content ? (
+                          <p
+                            className={`chat-bubble__text${errored ? ' is-error-text' : ''}${hasUiCard ? ' is-with-ui' : ''}`}
+                          >
+                            {m.content}
+                          </p>
+                        ) : null}
+
+                        {hasUiCard && m.ui ? (
+                          <MessageUiCard
+                            ui={m.ui}
+                            onOpenAccount={onOpenAccount}
+                            onOpenOpportunity={onOpenOpportunity}
+                          />
+                        ) : null}
+
+                        {stopped ? (
+                          <p className="chat-bubble__stopped" role="status">
+                            已停止生成
+                          </p>
+                        ) : null}
+
+                        {errored ? (
+                          <div className="chat-bubble__error-actions">
+                            <span className="chat-bubble__error-kind">
+                              {failureLabel(m.failureKind)}
+                            </span>
+                            <button
+                              type="button"
+                              className="chat-bubble__retry"
+                              onClick={() => retryMessage(m)}
+                              disabled={busy || generating || !m.retryUtterance}
+                            >
+                              重试
+                            </button>
+                          </div>
+                        ) : null}
+
+                        {showSteps ? (
+                          <details className="chat-steps">
+                            <summary>执行步骤</summary>
+                            <ol>
+                              {steps.map((step) => (
+                                <li key={step}>{step}</li>
+                              ))}
+                            </ol>
+                          </details>
+                        ) : null}
+
+                        {showConfidence || showAccountLink ? (
+                          <div className="chat-bubble__meta">
+                            {showConfidence ? (
+                              <span
+                                className="confidence"
+                                title="来自业务数据源的提取置信，不等于事实准确率"
+                              >
+                                提取置信 {(m.confidence * 100).toFixed(0)}%
+                              </span>
+                            ) : null}
+                            {showAccountLink && accountKey ? (
+                              <button
+                                type="button"
+                                className="chat-action-link"
+                                onClick={() => onOpenAccount?.(accountKey)}
+                              >
+                                查看客户画像
+                                <span aria-hidden>→</span>
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </article>
+
+                      {showOrigin || showTimeRow ? (
+                        <div className="chat-row__footer">
+                          {showOrigin ? (
+                            <div className="chat-row__sources" aria-label="信息来源">
+                              <span className="chat-row__agent-chip">{originLabel}</span>
+                            </div>
+                          ) : null}
+                          {showTimeRow ? (
+                            <time
+                              className="chat-row__time"
+                              dateTime={isUser ? m.createdAt : m.completedAt || m.createdAt}
+                            >
+                              {timeLabel}
+                            </time>
+                          ) : null}
+                        </div>
                       ) : null}
                     </div>
+                  )
+                })}
+              </div>
+            ) : null}
+
+            {drafts.length > 0 ? (
+              <section className="chat-drafts" aria-label="本轮草稿">
+                <div ref={draftsStartRef} className="chat-drafts__anchor" aria-hidden />
+                <div className="chat-drafts__head">
+                  <strong>本轮草稿</strong>
+                  {drafts.some((d) => d.kind === 'opportunity') && onOpenOpportunity ? (
+                    <button type="button" className="chat-action-link" onClick={onOpenOpportunity}>
+                      打开商机屏
+                      <span aria-hidden>→</span>
+                    </button>
                   ) : null}
-
-                  <article
-                    className={[
-                      'chat-bubble',
-                      `chat-bubble--${isUser ? 'user' : 'assistant'}`,
-                      pending ? 'is-pending' : '',
-                      stopped ? 'is-stopped' : '',
-                      errored ? 'is-error' : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
-                  >
-                    {pending ? (
-                      <div className="chat-progress" role="status">
-                        <span className="chat-progress__dot" aria-hidden />
-                        <span>{m.progressLabel || '正在处理'}</span>
-                      </div>
-                    ) : null}
-
-                    {m.content ? (
-                      <p className={`chat-bubble__text${errored ? ' is-error-text' : ''}`}>{m.content}</p>
-                    ) : null}
-
-                    {stopped ? (
-                      <p className="chat-bubble__stopped" role="status">
-                        已停止生成
-                      </p>
-                    ) : null}
-
-                    {errored ? (
-                      <div className="chat-bubble__error-actions">
-                        <span className="chat-bubble__error-kind">{failureLabel(m.failureKind)}</span>
-                        <button
-                          type="button"
-                          className="chat-bubble__retry"
-                          onClick={() => retryMessage(m)}
-                          disabled={busy || generating || !m.retryUtterance}
-                        >
-                          重试
-                        </button>
-                      </div>
-                    ) : null}
-
-                    {!isUser && !pending && steps.length > 0 ? (
-                      <details className="chat-steps">
-                        <summary>执行步骤</summary>
-                        <ol>
-                          {steps.map((step) => (
-                            <li key={step}>{step}</li>
-                          ))}
-                        </ol>
-                      </details>
-                    ) : null}
-
-                    {showConfidence ||
-                    (accountKey && onOpenAccount && !isUser && !pending && !errored) ? (
-                      <div className="chat-bubble__meta">
-                        {showConfidence ? (
-                          <span
-                            className="confidence"
-                            title="来自业务数据源的提取置信，不等于事实准确率"
-                          >
-                            提取置信 {(m.confidence * 100).toFixed(0)}%
-                          </span>
-                        ) : null}
-                        {accountKey && onOpenAccount && !pending && !errored ? (
-                          <button
-                            type="button"
-                            className="linkish"
-                            onClick={() => onOpenAccount(accountKey)}
-                          >
-                            查看客户画像 →
-                          </button>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </article>
-
-                  <div className="chat-row__footer">
-                    <p className="chat-row__origin" aria-label={`来源 ${originLabel}`}>
-                      来源：{originLabel}
-                    </p>
-                    {showDataSources ? <SourceChips sources={m.sources} /> : null}
-                    {showTimeRow ? (
-                      <time
-                        className="chat-row__time"
-                        dateTime={isUser ? m.createdAt : m.completedAt || m.createdAt}
-                      >
-                        {timeLabel}
-                      </time>
-                    ) : null}
-                  </div>
                 </div>
-              )
-            })}
+                <div className="chat-drafts__list">
+                  {drafts.map((d) => (
+                    <DraftCard
+                      key={d.idempotencyKey}
+                      draft={d}
+                      busy={busy || generating}
+                      hideSources
+                      onChange={updateDraft}
+                      onConfirm={(draft) => {
+                        void handleConfirm(draft)
+                      }}
+                      onDiscard={(draft) => {
+                        void handleDiscard(draft)
+                      }}
+                      onRetry={(draft) => {
+                        void handleConfirm({ ...draft, syncStatus: 'Draft' })
+                      }}
+                    />
+                  ))}
+                </div>
+              </section>
+            ) : null}
           </div>
         )}
-
-        {drafts.length > 0 ? (
-          <div className="draft-list">
-            <div className="capture__carousel-nav">
-              <strong>本轮草稿</strong>
-              {drafts.some((d) => d.kind === 'opportunity') && onOpenOpportunity ? (
-                <button type="button" className="linkish" onClick={onOpenOpportunity}>
-                  打开商机屏 →
-                </button>
-              ) : null}
-            </div>
-            {drafts.map((d) => (
-              <DraftCard
-                key={d.idempotencyKey}
-                draft={d}
-                busy={busy || generating}
-                onChange={updateDraft}
-                onConfirm={(draft) => {
-                  void handleConfirm(draft)
-                }}
-                onDiscard={(draft) => {
-                  void handleDiscard(draft)
-                }}
-                onRetry={(draft) => {
-                  void handleConfirm({ ...draft, syncStatus: 'Draft' })
-                }}
-              />
-            ))}
-          </div>
-        ) : null}
       </div>
 
       {showNewMsgHint ? (
