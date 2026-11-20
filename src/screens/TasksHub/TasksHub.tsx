@@ -1,10 +1,19 @@
 import './TasksHub.css'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { AgentInvocationRecord, DraftPayload } from '../../agents/types'
 import { api } from '../../api/client'
 import { SyncStatusBadge } from '../../components/SyncStatusBadge'
+import { PRIORITY_LABEL } from '../../data/activityInsight'
 import { listDrafts, refreshDraftsFromApi } from '../../data/dataverse'
 import { subscribeDrafts } from '../../data/draftStore'
+import {
+  formatDateKey,
+  formatTimeRange,
+  listInsightTasksForDate,
+  subscribeInsightTasks,
+  toggleInsightTaskDone,
+  type InsightTask,
+} from '../../data/insightTasks'
 import { listInvocations } from '../../data/invocationLog'
 
 type Props = {
@@ -16,6 +25,8 @@ type Props = {
 export function TasksHub({ onOpenCapture, onOpenOpportunity, onOpenDraft }: Props) {
   const [drafts, setDrafts] = useState<DraftPayload[]>(() => listDrafts())
   const [logs, setLogs] = useState<AgentInvocationRecord[]>(() => listInvocations().slice(0, 5))
+  const [insightTick, setInsightTick] = useState(0)
+  const todayKey = useMemo(() => formatDateKey(new Date()), [])
 
   useEffect(() => {
     void refreshDraftsFromApi().then(setDrafts)
@@ -48,9 +59,18 @@ export function TasksHub({ onOpenCapture, onOpenOpportunity, onOpenDraft }: Prop
       .catch(() => {
         setLogs(listInvocations().slice(0, 5))
       })
-    return subscribeDrafts(setDrafts)
+    const unsubDrafts = subscribeDrafts(setDrafts)
+    const unsubInsight = subscribeInsightTasks(() => setInsightTick((n) => n + 1))
+    return () => {
+      unsubDrafts()
+      unsubInsight()
+    }
   }, [])
 
+  const todayInsightTasks = useMemo(
+    () => listInsightTasksForDate(todayKey),
+    [todayKey, insightTick],
+  )
   const open = drafts.filter((d) => d.syncStatus === 'Draft' || d.syncStatus === 'SyncFailed')
   const syncing = drafts.filter((d) => d.syncStatus === 'Confirmed' || d.syncStatus === 'Syncing')
   const done = drafts.filter((d) => d.syncStatus === 'Synced').slice(0, 5)
@@ -60,7 +80,7 @@ export function TasksHub({ onOpenCapture, onOpenOpportunity, onOpenDraft }: Prop
       <header>
         <p className="home__eyebrow">任务</p>
         <h1>今日待办</h1>
-        <p className="muted">草稿确认、同步补偿、新拜访录入（选做增强屏）。</p>
+        <p className="muted">含 AI 洞察任务、草稿确认与同步补偿。</p>
       </header>
 
       <div className="home__actions">
@@ -71,6 +91,19 @@ export function TasksHub({ onOpenCapture, onOpenOpportunity, onOpenDraft }: Prop
           商机草稿
         </button>
       </div>
+
+      <TaskGroup
+        title={`AI 洞察任务（${todayInsightTasks.length}）`}
+        empty="今日暂无洞察任务，可在活动详情「添加到任务」"
+      >
+        {todayInsightTasks.map((task) => (
+          <InsightTaskRow
+            key={task.id}
+            task={task}
+            onToggle={() => toggleInsightTaskDone(task.id)}
+          />
+        ))}
+      </TaskGroup>
 
       <TaskGroup title={`待确认 / 失败（${open.length}）`} empty="暂无待处理草稿">
         {open.map((d) => (
@@ -142,6 +175,29 @@ function TaskRow({ draft, onOpen }: { draft: DraftPayload; onOpen: () => void })
         </div>
       </div>
       <SyncStatusBadge status={draft.syncStatus} />
+    </button>
+  )
+}
+
+function InsightTaskRow({ task, onToggle }: { task: InsightTask; onToggle: () => void }) {
+  const timeLabel = formatTimeRange(task.startTime || '09:00', task.endTime || '10:00')
+  return (
+    <button
+      type="button"
+      className={`task-row task-row--insight${task.done ? ' is-done' : ''}`}
+      onClick={onToggle}
+      aria-pressed={task.done}
+    >
+      <div>
+        <div className="task-row__title">{task.title}</div>
+        <div className="muted">
+          {timeLabel}
+          {` · ${PRIORITY_LABEL[task.priority]}`}
+          {task.orgName ? ` · ${task.orgName}` : ''}
+          {task.description ? ` · ${task.description}` : ''}
+        </div>
+      </div>
+      <span className="task-row__state">{task.done ? '已完成' : '待办'}</span>
     </button>
   )
 }

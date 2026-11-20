@@ -37,11 +37,13 @@
 }
 
 .screen-header__btn {
-  width: 40px;
-  height: 40px;
+  width: var(--control-size);
+  height: var(--control-size);
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
   border-radius: 50%;
   border: 1px solid var(--line-strong);
-  background: color-mix(in srgb, var(--surface-solid) 82%, transparent);
+  background: color-mix(in srgb, var(--surface-solid) 86%, transparent);
   color: var(--text-secondary);
   display: inline-flex;
   align-items: center;
@@ -50,6 +52,8 @@
   transition: background 0.15s ease, transform 0.1s ease, color 0.15s ease;
   padding: 0;
   flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 .screen-header__btn:hover {

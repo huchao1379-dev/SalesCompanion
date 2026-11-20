@@ -1,4 +1,8 @@
 import { config, hasDeepSeek } from './config.js'
+import {
+  mergeUtteranceWithAttachments,
+  understandAttachments,
+} from './agents/attachments.js'
 import { buildClarifyReply } from './agents/clarify.js'
 import { classifyIntent } from './agents/intent.js'
 import { ensureAgentsRegistered } from './agents/catalog.js'
@@ -28,15 +32,14 @@ import type {
  * Add agents in catalog.ts, then list them here (or use intents[] for single-route).
  */
 const PIPELINES: Partial<Record<Intent, PipelineDef>> = {
+  /**
+   * Visit path: extract → draft → supervise.
+   * Account resolve is folded into ActivityCreate (no separate AccountProfile hop),
+   * which cuts one sequential step without losing seed matching.
+   */
   capture_visit: {
     mode: 'sequential',
-    agents: [
-      'EntityExtract',
-      'AccountProfile',
-      'ActivityCreate',
-      'OpportunityCreate',
-      'OpportunitySupervisor',
-    ],
+    agents: ['EntityExtract', 'ActivityCreate', 'OpportunityCreate', 'OpportunitySupervisor'],
   },
   query_account: {
     mode: 'fanout',
@@ -246,13 +249,7 @@ function synthesizeVisitComposite(ctx: AgentContext): AgentMessage[] {
   const { account, opportunity, activity, extracted } = ctx.state
   if (!activity && !opportunity) return []
 
-  const chain = [
-    'EntityExtract',
-    'AccountProfile',
-    'ActivityCreate',
-    'OpportunityCreate',
-    'OpportunitySupervisor',
-  ]
+  const chain = ['EntityExtract', 'ActivityCreate', 'OpportunityCreate', 'OpportunitySupervisor']
   const product = [extracted?.productLine, extracted?.productModel].filter(Boolean).join(' ')
   const qty = extracted?.quantity ? `${extracted.quantity} 台` : ''
   const contact = extracted?.contactName || activity?.contactName
@@ -435,11 +432,11 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
           .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
           .map((item) => ({
             role: String(item.role || 'assistant'),
-            content: String(item.content || '').slice(0, 300),
+            content: String(item.content || '').slice(0, 480),
             agentName: typeof item.agent_name === 'string' ? item.agent_name : undefined,
           }))
           .filter((turn) => turn.content.trim().length > 0)
-          .slice(-8)
+          .slice(-10)
       }
     } catch {
       /* Corrupt conversation cache must not block a turn. */
@@ -448,8 +445,14 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
 
   // Server-side Shared Memory wins over client-supplied context.
   const memory: Record<string, string> = { ...(req.context || {}), ...serverMemory }
+
+  const attachmentStarted = performance.now()
+  const attachmentUnderstanding = await understandAttachments(req.attachments)
+  const effectiveUtterance = mergeUtteranceWithAttachments(utterance, attachmentUnderstanding)
+  const enrichedReq: OrchestratorRequest = { ...req, utterance: effectiveUtterance }
+
   const intentStarted = performance.now()
-  const intentResult = await classifyIntent(utterance, {
+  const intentResult = await classifyIntent(effectiveUtterance, {
     history,
     memory,
     knownAccounts: (await repository.listAccounts()).map((account) => ({
@@ -461,29 +464,46 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
   if (
     intent === 'clarify' &&
     memory.accountId &&
-    !/你能做|能做什么|有什么功能|怎么用|你好|嗨|hello|hi/i.test(utterance) &&
-    /那|它|这个|这家|刚才|这单|那单/.test(utterance)
+    !/你能做|能做什么|有什么功能|怎么用|你好|嗨|hello|hi/i.test(effectiveUtterance) &&
+    /那|它|这个|这家|刚才|这单|那单/.test(effectiveUtterance)
+  ) {
+    intent = 'query_account'
+  }
+  // Pronoun follow-ups with remembered account → prefer account query over vague clarify.
+  if (
+    intent === 'clarify' &&
+    memory.accountId &&
+    intentResult.focus === 'ambiguous' &&
+    /最近|怎么样|进度|信用|商机|画像/.test(effectiveUtterance)
   ) {
     intent = 'query_account'
   }
 
-  const ctx = await buildContext(req, intent, history, memory)
+  const ctx = await buildContext(enrichedReq, intent, history, memory)
   ctx.modes.add(intentResult.mode)
-  const steps: AgentStep[] = [
-    {
-      agentId: 'IntentRouter',
-      agentName: '意图路由',
-      status: intentResult.mode === 'heuristic' && hasDeepSeek() ? 'fallback' : 'ok',
-      latencyMs: Math.round(performance.now() - intentStarted),
-      summary: `${intentResult.intent} · ${(intentResult.confidence * 100).toFixed(0)}%`,
-    },
-  ]
+  const steps: AgentStep[] = []
+  if (req.attachments?.length) {
+    steps.push({
+      agentId: 'AttachmentUnderstand',
+      agentName: '附件理解',
+      status: attachmentUnderstanding.visionDegraded ? 'fallback' : 'ok',
+      latencyMs: Math.round(performance.now() - attachmentStarted),
+      summary: attachmentUnderstanding.summaries.join('；').slice(0, 160) || '已接收附件',
+    })
+  }
+  steps.push({
+    agentId: 'IntentRouter',
+    agentName: '意图路由',
+    status: intentResult.mode === 'heuristic' && hasDeepSeek() ? 'fallback' : 'ok',
+    latencyMs: Math.round(performance.now() - intentStarted),
+    summary: `${intentResult.intent} · ${(intentResult.confidence * 100).toFixed(0)}%`,
+  })
   await safeLog({
     sessionId: sessionKey,
     agentName: 'IntentRouter',
-    inputSummary: utterance.slice(0, 500),
+    inputSummary: effectiveUtterance.slice(0, 500),
     outputEnvelope: JSON.stringify(intentResult),
-    latencyMs: steps[0].latencyMs,
+    latencyMs: steps[steps.length - 1].latencyMs,
     success: true,
     confidence: intentResult.confidence,
     promptVersion: config.promptVersion,
@@ -494,15 +514,22 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
   let drafts: DraftPayload[] = []
   let pipelineError: unknown
 
+  // Prefer running domain agents. Clarify only for true clarify intents,
+  // capability/greeting, or queries that lack both utterance cues and memory.
   const missingAccount =
     intentResult.missingSlots.includes('account') &&
     !memory.accountId &&
-    !/仁济|Hospital|医院/.test(utterance)
+    !memory.accountName &&
+    !memory.accountRef &&
+    !/仁济|Hospital|医院/.test(effectiveUtterance)
+  const softClarifyFocus =
+    intentResult.focus === 'capability' ||
+    intentResult.focus === 'greeting' ||
+    intentResult.focus === 'missing_info'
   const shouldClarify =
     intent === 'clarify' ||
-    intentResult.needsClarification ||
-    intentResult.confidence < 0.6 ||
-    missingAccount
+    (intentResult.needsClarification && softClarifyFocus && intent !== 'capture_visit') ||
+    (missingAccount && (intent === 'query_account' || intent === 'query_order'))
 
   if (shouldClarify) {
     const clarifyStarted = performance.now()
@@ -575,14 +602,32 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
 
   messages = messages.map((message) => normalizeMessage(message))
   ctx.memory.lastIntent = intent
-  ctx.memory.lastUtterance = utterance
+  ctx.memory.lastUtterance = utterance.slice(0, 500)
+  if (attachmentUnderstanding.contextBlock) {
+    ctx.memory.lastAttachmentSummary = attachmentUnderstanding.summaries.join('；').slice(0, 400)
+  }
   if (ctx.state.account) {
     ctx.memory.accountId = ctx.state.account.id
     ctx.memory.accountName = ctx.state.account.name
     ctx.memory.accountRef = ctx.state.account.externalKey
   }
-  if (ctx.state.opportunity?.existingOpportunityRef) {
-    ctx.memory.opportunityId = ctx.state.opportunity.existingOpportunityRef
+  if (ctx.state.activity?.idempotencyKey) {
+    ctx.memory.lastActivityKey = ctx.state.activity.idempotencyKey
+  }
+  if (ctx.state.opportunity?.idempotencyKey) {
+    ctx.memory.lastOpportunityKey = ctx.state.opportunity.idempotencyKey
+  }
+  if (ctx.state.opportunity?.existingOpportunityRef || ctx.state.opportunity?.id) {
+    ctx.memory.opportunityId =
+      ctx.state.opportunity.existingOpportunityRef || ctx.state.opportunity.id || ctx.memory.opportunityId
+  }
+  for (const draft of drafts) {
+    if (draft.kind === 'activity' && draft.idempotencyKey) {
+      ctx.memory.lastActivityKey = draft.idempotencyKey
+    }
+    if (draft.kind === 'opportunity' && draft.idempotencyKey) {
+      ctx.memory.lastOpportunityKey = draft.idempotencyKey
+    }
   }
 
   const latencyMs = Math.round(performance.now() - startedAt)
@@ -595,9 +640,15 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
         ? 'heuristic'
         : 'deepseek'
   const fallbackSteps = steps.filter((step) => step.status === 'fallback' || step.status === 'error')
-  const degradedReason = fallbackSteps.length
-    ? `部分步骤降级：${fallbackSteps.map((step) => step.agentName).join('、')}`
-    : undefined
+  const degradedParts = [
+    fallbackSteps.length
+      ? `部分步骤降级：${fallbackSteps.map((step) => step.agentName).join('、')}`
+      : '',
+    attachmentUnderstanding.visionDegraded
+      ? '部分图片未能视觉识别（未配置 VISION_MODEL 或识别失败），已按文件名/文字说明继续。'
+      : '',
+  ].filter(Boolean)
+  const degradedReason = degradedParts.length ? degradedParts.join(' ') : undefined
 
   await safeLog({
     sessionId: sessionKey,

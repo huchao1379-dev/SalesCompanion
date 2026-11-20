@@ -42,15 +42,36 @@
 
 .capture-screen__steps li {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  gap: 0.35rem;
   min-height: 34px;
   border-radius: 999px;
   font-size: 0.78rem;
   font-weight: 650;
   color: var(--muted);
   transition: background 0.18s ease, color 0.18s ease;
+}
+
+.capture-screen__step-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-height: 34px;
+  padding: 0.2rem 0.35rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.capture-screen__steps li.is-clickable .capture-screen__step-btn:hover {
+  background: color-mix(in srgb, var(--green-soft) 55%, transparent);
 }
 
 .capture-screen__steps li.is-active {
@@ -60,6 +81,11 @@
 
 .capture-screen__steps li.is-done {
   color: var(--green-deep);
+}
+
+.capture-screen__steps li.is-disabled .capture-screen__step-btn {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .capture-screen__step-dot {
@@ -92,19 +118,129 @@
 .capture-screen__fallback,
 .capture-screen__transcript,
 .capture-screen__carousel,
-.capture-screen__empty {
+.capture-screen__empty,
+.capture-screen__content {
   background: color-mix(in srgb, var(--surface-solid) 94%, transparent);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow-soft);
 }
 
+.capture-screen__account-wrap {
+  position: relative;
+  z-index: 0;
+}
+
+.capture-screen__account-wrap.is-open {
+  z-index: 6;
+}
+
 .capture-screen__account {
   display: grid;
-  grid-template-columns: 42px 1fr;
+  grid-template-columns: 42px 1fr auto;
   gap: 0.75rem 0.85rem;
   padding: var(--space-4);
   align-items: start;
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.capture-screen__account--select {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.capture-screen__account--select:hover,
+.capture-screen__account--select.is-open {
+  border-color: color-mix(in srgb, var(--green) 35%, var(--line));
+  box-shadow: var(--shadow-soft), 0 0 0 3px color-mix(in srgb, var(--green-soft) 55%, transparent);
+}
+
+.capture-screen__account-chevron {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-muted);
+  color: var(--muted);
+  align-self: center;
+  transition: transform 0.18s ease;
+}
+
+.capture-screen__account--select.is-open .capture-screen__account-chevron {
+  transform: rotate(180deg);
+  color: var(--green-deep);
+  background: var(--green-soft);
+}
+
+.capture-screen__account-menu {
+  list-style: none;
+  margin: 0.45rem 0 0;
+  padding: 0.35rem;
+  position: absolute;
+  inset-inline: 0;
+  top: calc(100% + 0.15rem);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  max-height: 220px;
+  overflow: auto;
+  z-index: 5;
+}
+
+.capture-screen__account-option {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.65rem 0.7rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.capture-screen__account-option:hover,
+.capture-screen__account-option.is-selected {
+  background: var(--green-soft);
+}
+
+.capture-screen__account-option-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, #14b8a6 18%, var(--surface-muted));
+  color: #0f766e;
+}
+
+.capture-screen__account-option-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.capture-screen__account-option-body strong {
+  font-size: 0.92rem;
+}
+
+.capture-screen__account-option-body span {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
 }
 
 .capture-screen__account-icon,
@@ -158,10 +294,10 @@
 }
 
 .capture-screen__account-chips {
-  grid-column: 2;
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
+  margin-top: 0.45rem;
 }
 
 .metric-chip--accent {
@@ -268,12 +404,184 @@
   color: var(--danger);
 }
 
-.capture-screen__rec-bar {
+.capture-screen__content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.85rem;
+  box-shadow: none;
+  background: var(--surface-muted);
+}
+
+.capture-screen__content-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.capture-screen__content-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.capture-screen__content-title strong {
+  font-size: 0.86rem;
+}
+
+.capture-screen__content-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.capture-screen__content-actions .chip-btn {
+  gap: 0.3rem;
+  min-height: 34px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.78rem;
+}
+
+.capture-screen__content-display,
+.capture-screen__content-input {
+  width: 100%;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-solid);
+  color: var(--text);
+  padding: 0.75rem 0.85rem;
+  min-height: 7.5rem;
+}
+
+.capture-screen__content-display {
+  overflow: auto;
+  max-height: 12rem;
+}
+
+.capture-screen__content-display.is-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  border-style: dashed;
+  background: color-mix(in srgb, var(--surface-solid) 70%, transparent);
+}
+
+.capture-screen__content-display p,
+.capture-screen__content-placeholder {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.capture-screen__content-placeholder {
+  color: var(--muted);
+  white-space: normal;
+}
+
+.capture-screen__content-input {
+  resize: vertical;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.capture-screen__ai-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--green) 28%, var(--line));
+  background: color-mix(in srgb, var(--green-soft) 55%, var(--surface-solid));
+}
+
+.capture-screen__ai-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.capture-screen__ai-summary-head strong {
+  font-size: 0.84rem;
+  color: var(--green-deep);
+}
+
+.capture-screen__ai-summary-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--green-soft);
+  color: var(--green-deep);
+  flex-shrink: 0;
+}
+
+.capture-screen__ai-summary-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.capture-screen__ai-summary-body {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.capture-screen__ai-summary--confirm {
+  background: color-mix(in srgb, var(--green-soft) 45%, var(--surface-solid));
+  border: 1px solid color-mix(in srgb, var(--green) 28%, var(--line));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: 0.85rem 1rem;
+}
+
+.capture-screen__paused-pill,
+.capture-screen__saved-pill {
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+}
+
+.capture-screen__paused-pill {
+  color: #92400e;
+  background: var(--warn-soft);
+}
+
+.capture-screen__saved-pill {
+  color: var(--green-deep);
+  background: var(--green-soft);
+}
+
+.capture-screen__rec-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.35rem 0 0.15rem;
+}
+
+.capture-screen__rec-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.capture-screen__rec-buttons {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
+  width: 100%;
 }
 
 .capture-screen__rec-time {
@@ -283,10 +591,28 @@
   min-width: 3.5ch;
 }
 
-.capture-screen__rec-bar .btn {
-  min-height: 40px;
-  padding: 0.45rem 0.95rem;
-  font-size: 0.85rem;
+.capture-screen__rec-btn {
+  min-height: 44px;
+  padding: 0.5rem 1rem;
+  font-size: 0.88rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.capture-screen__rec-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.capture-screen__live.is-paused {
+  color: #92400e;
+  background: var(--warn-soft);
+  animation: none;
+}
+
+.capture-screen__hero.is-paused {
+  border-color: color-mix(in srgb, var(--warn) 40%, var(--line));
 }
 
 .capture-screen__privacy {
@@ -298,20 +624,6 @@
   align-self: center;
 }
 
-.capture-screen__keyboard {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  width: 100%;
-}
-
-.capture-screen__keyboard-label {
-  font-size: 0.8rem;
-  color: var(--muted);
-  font-weight: 650;
-}
-
-.capture-screen__keyboard textarea,
 .capture-screen__transcript textarea {
   width: 100%;
   border-radius: var(--radius-sm);
@@ -339,6 +651,8 @@
 }
 
 .capture-screen__drafts {
+  position: relative;
+  z-index: 0;
   background: color-mix(in srgb, var(--surface-solid) 94%, transparent);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -347,6 +661,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  min-width: 0;
+  overflow: visible;
 }
 
 .capture-screen__drafts-head {
@@ -650,7 +966,7 @@
   }
 
   .capture-screen__account {
-    grid-template-columns: 36px 1fr;
+    grid-template-columns: 36px 1fr auto;
     gap: 0.55rem 0.65rem;
     padding: 0.85rem;
   }
@@ -669,8 +985,20 @@
   .capture-screen__fallback,
   .capture-screen__transcript,
   .capture-screen__carousel,
-  .capture-screen__empty {
+  .capture-screen__empty,
+  .capture-screen__content {
     padding: 0.85rem;
+  }
+
+  .capture-screen__content-actions .chip-btn {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .capture-screen__rec-btn {
+    flex: 1;
+    min-width: 0;
+    justify-content: center;
   }
 
   .capture-screen__hero-copy {
@@ -686,11 +1014,6 @@
   .capture-screen__carousel-head .btn,
   .capture-screen__drafts-head .btn {
     width: 100%;
-  }
-
-  .capture-screen__rec-bar .btn {
-    flex: 1;
-    min-width: 0;
   }
 
   .capture-screen__privacy {

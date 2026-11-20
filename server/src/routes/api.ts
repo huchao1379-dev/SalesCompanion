@@ -1,11 +1,25 @@
 import { Router } from 'express'
-import { config, hasCopilotStudioConfig, hasDeepSeek } from '../config.js'
+import { config, hasCopilotStudioConfig, hasDeepSeek, hasVisionModel } from '../config.js'
 import { CopilotStudioConfigurationError, copilotStudioOrchestrate } from '../copilotStudio.js'
 import { orchestrate } from '../orchestrator.js'
 import { repository } from '../store/dataverseStore.js'
 import { resolveAccount, synthesizeAccountProfile } from '../agents/accountProfile.js'
 import { getCatalogSummary, ensureAgentsRegistered } from '../agents/catalog.js'
-import type { DraftPayload } from '../types.js'
+import { generateActivityInsight } from '../agents/activityInsight.agent.js'
+import type { DraftPayload, OrchestratorAttachment } from '../types.js'
+
+function normalizeAttachments(raw: unknown): OrchestratorAttachment[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+    .map((item) => ({
+      name: String(item.name || 'attachment').slice(0, 120),
+      mimeType: String(item.mimeType || 'application/octet-stream').slice(0, 80),
+      dataBase64: String(item.dataBase64 || ''),
+    }))
+    .filter((item) => item.dataBase64.length > 0)
+    .slice(0, 5)
+}
 
 export const apiRouter = Router()
 
@@ -15,6 +29,8 @@ apiRouter.get('/health', async (_req, res) => {
     ok: true,
     aiProvider: config.aiProvider,
     deepseek: hasDeepSeek(),
+    vision: hasVisionModel(),
+    visionModel: hasVisionModel() ? config.visionModel : undefined,
     copilotstudio: hasCopilotStudioConfig(),
     dataverseRemote: repository.mode === 'dataverse-webapi',
     dataverseMode: repository.mode,
@@ -32,15 +48,17 @@ apiRouter.get('/agents', (_req, res) => {
 async function handleOrchestrate(req: import('express').Request, res: import('express').Response, useCopilotStudio = false) {
   try {
     const utterance = String(req.body?.utterance || '').trim()
-    if (!utterance) {
-      res.status(400).json({ error: 'utterance required' })
+    const attachments = normalizeAttachments(req.body?.attachments)
+    if (!utterance && attachments.length === 0) {
+      res.status(400).json({ error: 'utterance or attachments required' })
       return
     }
     const payload = {
-      utterance,
+      utterance: utterance || '请根据附件内容协助处理',
       locale: req.body?.locale,
       context: req.body?.context,
       turnId: typeof req.body?.turnId === 'string' ? req.body.turnId.slice(0, 100) : undefined,
+      attachments: attachments.length ? attachments : undefined,
     }
     const result = useCopilotStudio
       ? await copilotStudioOrchestrate(payload)
@@ -62,6 +80,64 @@ async function handleOrchestrate(req: import('express').Request, res: import('ex
 apiRouter.post('/orchestrate', (req, res) => handleOrchestrate(req, res))
 /** Explicit Copilot Studio SDK endpoint. DeepSeek remains available through /orchestrate when enabled. */
 apiRouter.post('/copilot/message', (req, res) => handleOrchestrate(req, res, true))
+
+/** Activity detail → AI 洞察（商机完成状况 + 近期拜访 + 结果 → 中文建议） */
+apiRouter.post('/activity-insight', async (req, res) => {
+  try {
+    const activity = req.body?.activity
+    if (!activity || typeof activity !== 'object' || !String(activity.orgName || '').trim()) {
+      res.status(400).json({ error: 'activity.orgName required' })
+      return
+    }
+    const result = await generateActivityInsight({
+      activity: {
+        id: String(activity.id || 'activity'),
+        title: String(activity.title || ''),
+        type: String(activity.type || 'visit'),
+        status: String(activity.status || ''),
+        time: activity.time ? String(activity.time) : undefined,
+        location: activity.location ? String(activity.location) : undefined,
+        orgName: String(activity.orgName),
+        orgIndustry: activity.orgIndustry ? String(activity.orgIndustry) : undefined,
+        notes: activity.notes ? String(activity.notes) : undefined,
+        contacts: Array.isArray(activity.contacts)
+          ? activity.contacts
+              .filter((c: unknown) => c && typeof c === 'object')
+              .map((c: { name?: string; role?: string }) => ({
+                name: String(c.name || ''),
+                role: c.role ? String(c.role) : undefined,
+              }))
+              .filter((c: { name: string }) => c.name)
+          : undefined,
+      },
+      recentVisits: Array.isArray(req.body?.recentVisits)
+        ? req.body.recentVisits
+            .filter((v: unknown) => v && typeof v === 'object')
+            .map((v: { title?: string; time?: string; status?: string; notes?: string }) => ({
+              title: String(v.title || ''),
+              time: v.time ? String(v.time) : undefined,
+              status: v.status ? String(v.status) : undefined,
+              notes: v.notes ? String(v.notes) : undefined,
+            }))
+            .filter((v: { title: string }) => v.title)
+        : undefined,
+      refreshNonce:
+        typeof req.body?.refreshNonce === 'string'
+          ? req.body.refreshNonce.slice(0, 64)
+          : undefined,
+    })
+    res.json(result)
+  } catch (err) {
+    await repository.writeLog({
+      agentName: 'ActivityInsight',
+      inputSummary: String(req.body?.activity?.title || req.body?.activity?.orgName || ''),
+      latencyMs: 0,
+      success: false,
+      errorMessage: err instanceof Error ? err.message : 'unknown',
+    })
+    res.status(500).json({ error: err instanceof Error ? err.message : 'activity insight failed' })
+  }
+})
 
 apiRouter.get('/drafts', async (_req, res) => {
   res.json({ drafts: await repository.listAllDrafts() })

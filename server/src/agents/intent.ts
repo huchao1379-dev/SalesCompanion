@@ -55,6 +55,10 @@ export async function classifyIntent(
             lastIntent: options.memory?.lastIntent || null,
             accountId: options.memory?.accountId || null,
             accountName: options.memory?.accountName || null,
+            accountRef: options.memory?.accountRef || null,
+            lastActivityKey: options.memory?.lastActivityKey || null,
+            lastOpportunityKey: options.memory?.lastOpportunityKey || null,
+            lastAttachmentSummary: options.memory?.lastAttachmentSummary || null,
           },
           knownAccounts: (options.knownAccounts || []).map((account) => ({
             name: account.name,

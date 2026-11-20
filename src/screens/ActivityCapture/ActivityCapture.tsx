@@ -1,19 +1,32 @@
 import './ActivityCapture.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AccountProfile, DraftPayload } from '../../agents/types'
+import type {
+  AccountProfile,
+  DraftPayload,
+  OrchestratorResponse,
+} from '../../agents/types'
 import { getOrchestratorMode, orchestrate } from '../../agents/orchestratorClient'
 import {
   IconBuilding,
   IconCheck,
+  IconChevronDown,
   IconEye,
   IconMic,
+  IconPause,
+  IconPlay,
   IconRefresh,
   IconSpark,
+  IconStop,
 } from '../../components/DashIcons'
 import { DraftCard } from '../../components/DraftCard'
 import { MicButton } from '../../components/MicButton'
 import { ScreenHeader } from '../../components/ScreenHeader'
-import { fetchAccountInsight, getAccountInsight } from '../../data/accounts'
+import {
+  fetchAccountInsight,
+  getAccountInsight,
+  listAccountsFromApi,
+  listMockAccounts,
+} from '../../data/accounts'
 import {
   confirmAndSyncDetailed,
   discardDraft,
@@ -33,12 +46,14 @@ type Props = {
   onBack?: () => void
   onDraftsCommitted?: (drafts: DraftPayload[]) => void
   onOpenOpportunity?: () => void
+  onAccountChange?: (accountRef: string) => void
 }
 
 /** Explicit capture flow phases for sales mobile recording. */
 export type CapturePhase =
   | 'idle'
   | 'recording'
+  | 'paused'
   | 'processing'
   | 'transcript_ready'
   | 'recognition_failed'
@@ -48,14 +63,60 @@ export type CapturePhase =
   | 'sync_success'
   | 'sync_failed'
 
-const DEMO_UTTERANCE =
-  '刚拜访完上海仁济医院张主任，他对监护仪 N17 感兴趣，要 12 台，下周三再约一次定标书细节。'
-
 const STEPS = [
   { key: 'speak', label: '口述' },
   { key: 'transcript', label: '转写' },
   { key: 'confirm', label: '确认' },
 ] as const
+
+function buildAiSummaryText(res: OrchestratorResponse): string {
+  const activity = res.drafts.find((d) => d.kind === 'activity')
+  const opportunity = res.drafts.find((d) => d.kind === 'opportunity')
+  const sections: string[] = []
+
+  if (activity && activity.kind === 'activity') {
+    const lines = [
+      `拜访摘要：${activity.summary || activity.subject || '（待补充）'}`,
+      activity.accountName ? `客户：${activity.accountName}` : null,
+      activity.contactName && activity.contactName !== '待补充'
+        ? `联系人：${activity.contactName}`
+        : null,
+      activity.visitType ? `类型：${activity.visitType}` : null,
+      activity.followUpAt ? `跟进：${activity.followUpAt.slice(0, 10)}` : null,
+    ].filter(Boolean)
+    sections.push(lines.join('\n'))
+  }
+
+  if (opportunity && opportunity.kind === 'opportunity') {
+    const qty = opportunity.quantity > 0 ? ` × ${opportunity.quantity}` : ''
+    sections.push(
+      [
+        `商机意向：${opportunity.name || opportunity.productLine || '（待补充）'}`,
+        opportunity.productLine
+          ? `产品：${opportunity.productLine}${opportunity.productModel ? ` ${opportunity.productModel}` : ''}${qty}`
+          : null,
+        opportunity.stage ? `阶段：${opportunity.stage}` : null,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    )
+  }
+
+  const assistantText = res.messages
+    .filter((m) => m.role === 'assistant' && m.content.trim())
+    .map((m) => m.content.trim())
+    .join('\n\n')
+
+  if (assistantText) {
+    sections.push(assistantText)
+  }
+
+  if (!sections.length) {
+    return '暂未提取到可展示的总结。请用包含客户、联系人、产品与跟进时间的拜访口述再试。'
+  }
+
+  return sections.join('\n\n')
+}
 
 const PHASE_COPY: Record<
   CapturePhase,
@@ -63,13 +124,18 @@ const PHASE_COPY: Record<
 > = {
   idle: {
     title: '待机',
-    detail: '点击麦克风开始录音，或改用键盘。语音识别依赖浏览器能力，可能需联网。',
+    detail: '点击麦克风开始录音。转写内容会实时显示在上方区域。',
     tone: 'neutral',
   },
   recording: {
     title: '录音中',
-    detail: '请说出客户、联系人、产品与跟进时间。可随时停止或取消。',
+    detail: '请说出客户、联系人、产品与跟进时间。可暂停或结束录音。',
     tone: 'live',
+  },
+  paused: {
+    title: '已暂停',
+    detail: '录音已暂停，可继续录音或结束并处理转写内容。',
+    tone: 'warn',
   },
   processing: {
     title: '处理中',
@@ -78,12 +144,12 @@ const PHASE_COPY: Record<
   },
   transcript_ready: {
     title: '转写完成',
-    detail: '请核对并编辑转写内容，确认无误后再生成草稿。',
+    detail: '可直接点击内容区修改，或进行 AI 总结。',
     tone: 'ok',
   },
   recognition_failed: {
     title: '识别失败',
-    detail: '未得到有效转写。请重试录音，或切换键盘输入。',
+    detail: '未得到有效转写。请重试录音，或直接在内容区补充。',
     tone: 'warn',
   },
   network_error: {
@@ -93,7 +159,7 @@ const PHASE_COPY: Record<
   },
   permission_denied: {
     title: '麦克风权限拒绝',
-    detail: '请在系统设置中允许麦克风，或直接使用键盘输入拜访内容。',
+    detail: '请在系统设置中允许麦克风，或直接在内容区输入拜访内容。',
     tone: 'danger',
   },
   submitting: {
@@ -121,11 +187,16 @@ function deriveStepIndex(phase: CapturePhase, hasDrafts: boolean, hasTranscript:
     hasTranscript ||
     phase === 'transcript_ready' ||
     phase === 'processing' ||
-    phase === 'recording'
+    phase === 'recording' ||
+    phase === 'paused'
   ) {
     return phase === 'recording' && !hasTranscript ? 0 : 1
   }
   return 0
+}
+
+function formatElapsed(seconds: number) {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
 export function ActivityCapture({
@@ -134,12 +205,17 @@ export function ActivityCapture({
   onBack,
   onDraftsCommitted,
   onOpenOpportunity,
+  onAccountChange,
 }: Props) {
   const speech = useWebSpeech()
   const [phase, setPhase] = useState<CapturePhase>(() =>
     initialDrafts.length > 0 ? 'transcript_ready' : 'idle',
   )
-  const [keyboardMode, setKeyboardMode] = useState(() => !speech.supported)
+  const [accountPickerOpen, setAccountPickerOpen] = useState(false)
+  const [accountOptions, setAccountOptions] = useState<AccountProfile[]>(() => listMockAccounts())
+  const [selectedAccountRef, setSelectedAccountRef] = useState(
+    () => accountKey || 'SAP-ACC-RENJI',
+  )
   const [transcriptEdit, setTranscriptEdit] = useState(() => {
     const fromActivity = initialDrafts.find((d) => d.kind === 'activity')
     return fromActivity && 'transcript' in fromActivity ? fromActivity.transcript : ''
@@ -149,24 +225,41 @@ export function ActivityCapture({
   const [simulateFail, setSimulateFail] = useState(false)
   const [showDevTools, setShowDevTools] = useState(false)
   const [usedMockSync, setUsedMockSync] = useState(false)
+  const [savedHint, setSavedHint] = useState(false)
+  const [aiSummary, setAiSummary] = useState('')
+  const [viewStep, setViewStep] = useState(() => (initialDrafts.length > 0 ? 2 : 0))
   const [offlinePending, setOfflinePending] = useState(
     () => listOfflineUtterances().filter((u) => !u.synced).length,
   )
   const recordStartedAt = useRef<number | null>(null)
+  const pausedAccumulated = useRef(0)
+  const autoSaveTimer = useRef<number | null>(null)
   const [elapsed, setElapsed] = useState(0)
-
-  const accountRefForContext = useMemo(() => {
-    const fromDraft = drafts.find((d) => d.accountRef)?.accountRef
-    return accountKey || fromDraft || 'SAP-ACC-RENJI'
-  }, [accountKey, drafts])
+  const contentAreaRef = useRef<HTMLTextAreaElement | null>(null)
 
   const [contextAccount, setContextAccount] = useState<AccountProfile | null>(() =>
-    getAccountInsight(accountRefForContext),
+    getAccountInsight(selectedAccountRef),
   )
 
   useEffect(() => {
     let alive = true
-    void fetchAccountInsight(accountRefForContext)
+    void listAccountsFromApi()
+      .then((list) => {
+        if (alive && list.length) setAccountOptions(list)
+      })
+      .catch(() => {
+        /* Keep mock list. */
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    const seed = getAccountInsight(selectedAccountRef)
+    if (seed) setContextAccount(seed)
+    void fetchAccountInsight(selectedAccountRef)
       .then((profile) => {
         if (alive && profile) setContextAccount(profile)
       })
@@ -176,7 +269,7 @@ export function ActivityCapture({
     return () => {
       alive = false
     }
-  }, [accountRefForContext])
+  }, [selectedAccountRef])
 
   const openOppNames = useMemo(
     () => contextAccount?.openOpportunities.map((o) => o.name) ?? [],
@@ -192,46 +285,102 @@ export function ActivityCapture({
   const failedCount = drafts.filter((d) => d.syncStatus === 'SyncFailed').length
   const syncedCount = drafts.filter((d) => d.syncStatus === 'Synced').length
 
+  const isRecordingSession = phase === 'recording' || phase === 'paused'
   const livePreview = speech.listening
     ? [speech.transcript, speech.interimTranscript].filter(Boolean).join(' ')
     : ''
   const displayTranscript = speech.listening ? livePreview : transcriptEdit
-  const stepIndex = deriveStepIndex(phase, drafts.length > 0, Boolean(transcriptEdit.trim()))
-  const busy =
-    phase === 'processing' || phase === 'submitting' || phase === 'recording'
+  const derivedStep = deriveStepIndex(phase, drafts.length > 0, Boolean(transcriptEdit.trim()))
+  const stepIndex = viewStep
+  const isConfirmStep = stepIndex === 2
+  const busy = phase === 'processing' || phase === 'submitting' || phase === 'recording'
   const phaseMeta = PHASE_COPY[phase]
+  const contentLocked =
+    phase === 'processing' || phase === 'submitting' || phase === 'recording'
+  const hasContent = Boolean(displayTranscript.trim())
+  const canOpenStep = (index: number) => {
+    if (index <= 1) return true
+    return drafts.length > 0 || derivedStep >= 2
+  }
+
+  /* Keep the visible step in sync when the flow advances forward. */
+  useEffect(() => {
+    setViewStep((prev) => (derivedStep > prev ? derivedStep : prev))
+  }, [derivedStep])
 
   useEffect(() => {
-    if (!speech.listening) return
+    if (!isConfirmStep) return
+    setAccountPickerOpen(false)
+  }, [isConfirmStep])
+
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimer.current != null) {
+        window.clearTimeout(autoSaveTimer.current)
+      }
+    }
+  }, [])
+
+  function goToStep(index: number) {
+    if (!canOpenStep(index)) {
+      setStatusDetail(
+        index === 2
+          ? '请先完成 AI 总结并生成草稿后再进入确认'
+          : '请先录音或录入转写内容后再查看转写步骤',
+      )
+      return
+    }
+    if (phase === 'recording' || phase === 'paused') {
+      setStatusDetail('请先结束或取消当前录音，再切换步骤')
+      return
+    }
+    setViewStep(index)
+    setAccountPickerOpen(false)
+    window.requestAnimationFrame(() => {
+      document
+        .querySelector('.capture-screen__steps')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+
+  useEffect(() => {
+    if (phase !== 'recording') return
     const id = window.setInterval(() => {
       if (recordStartedAt.current == null) return
-      setElapsed(Math.floor((Date.now() - recordStartedAt.current) / 1000))
+      setElapsed(
+        pausedAccumulated.current + Math.floor((Date.now() - recordStartedAt.current) / 1000),
+      )
     }, 200)
     return () => window.clearInterval(id)
-  }, [speech.listening])
+  }, [phase])
 
   /* eslint-disable react-hooks/set-state-in-effect -- Browser Speech API errors are external events mirrored into the capture phase. */
   useEffect(() => {
     if (!speech.errorKind) return
     if (speech.errorKind === 'not-allowed') {
       setPhase('permission_denied')
-      setKeyboardMode(true)
       setStatusDetail(speech.error)
     } else if (speech.errorKind === 'network') {
       setPhase('network_error')
       setStatusDetail(speech.error)
     } else if (speech.errorKind === 'no-speech' || speech.errorKind === 'other') {
-      if (phase === 'recording' || phase === 'idle') {
+      if (phase === 'recording' || phase === 'idle' || phase === 'paused') {
         setPhase('recognition_failed')
         setStatusDetail(speech.error)
-        setKeyboardMode(true)
       }
     } else if (speech.errorKind === 'unsupported') {
-      setKeyboardMode(true)
       setStatusDetail(speech.error)
     }
   }, [speech.errorKind, speech.error, phase])
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  function selectAccount(profile: AccountProfile) {
+    setSelectedAccountRef(profile.accountRef)
+    setContextAccount(profile)
+    setAccountPickerOpen(false)
+    onAccountChange?.(profile.accountRef)
+    setStatusDetail(`已选择客户：${profile.accountName}`)
+  }
 
   function applyDuplicateHints(list: DraftPayload[]): DraftPayload[] {
     if (!contextAccount?.openOpportunities.length) return list
@@ -254,7 +403,6 @@ export function ActivityCapture({
       return {
         ...d,
         supervisorHints: hints,
-        // Do not auto-create: leave reuseExisting false until user confirms, but surface warning
       }
     })
   }
@@ -279,11 +427,15 @@ export function ActivityCapture({
     setStatusDetail(
       getOrchestratorMode() === 'deepseek'
         ? 'DeepSeek 编排中…'
-        : '正在生成草稿（请核对不确定字段）…',
+        : '正在生成 AI 总结与草稿…',
     )
     try {
+      // Bias the capture page toward visit extraction even for short utterances.
+      const captureUtterance = /拜访|录入拜访|刚拜访/.test(trimmed)
+        ? trimmed
+        : `录入拜访：${trimmed}`
       const res = await orchestrate({
-        utterance: trimmed,
+        utterance: captureUtterance,
         locale: 'zh-CN',
         turnId: `capture_${trimmed.slice(0, 80)}`,
         context: contextAccount
@@ -294,9 +446,22 @@ export function ActivityCapture({
       next.forEach((d) => upsertDraft(d))
       setDrafts(next)
       setTranscriptEdit(trimmed)
+      const summaryText = buildAiSummaryText(res)
+      setAiSummary(summaryText)
       setPhase('transcript_ready')
-      setStatusDetail(`草稿已生成 · 请分别核对拜访与商机后再确认同步`)
-      onDraftsCommitted?.(next)
+      if (next.length > 0) {
+        setStatusDetail(`AI 总结完成 · 已生成 ${next.length} 条草稿，请核对后确认同步`)
+        onDraftsCommitted?.(next)
+      } else {
+        setStatusDetail('AI 已返回说明，但未生成草稿。请按示例补充客户/产品信息后重试。')
+      }
+      // Scroll summary into view after paint.
+      window.requestAnimationFrame(() => {
+        document.getElementById('capture-ai-summary')?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'nearest',
+        })
+      })
     } catch (err) {
       setPhase('network_error')
       setStatusDetail(err instanceof Error ? err.message : '编排失败，请检查网络或后端服务')
@@ -330,50 +495,133 @@ export function ActivityCapture({
     speech.clearError()
     setStatusDetail(null)
     setUsedMockSync(false)
+    setSavedHint(false)
+    setAiSummary('')
     if (!speech.supported) {
-      setKeyboardMode(true)
       setPhase('idle')
-      setStatusDetail('当前环境不支持语音识别，请使用键盘输入')
+      setStatusDetail('当前环境不支持语音识别，请在内容区直接输入')
       return
     }
     if (!isOnline()) {
-      // Web Speech often needs network; still allow attempt but warn
-      setStatusDetail('当前离线：浏览器语音识别可能不可用，建议改用键盘')
+      setStatusDetail('当前离线：浏览器语音识别可能不可用')
     }
+    pausedAccumulated.current = 0
     recordStartedAt.current = Date.now()
     setElapsed(0)
     setPhase('recording')
     speech.start('zh-CN')
   }
 
-  function stopRecording() {
-    const text = speech.stop()
+  function pauseRecording() {
+    const text = speech.pause()
+    if (recordStartedAt.current != null) {
+      pausedAccumulated.current += Math.floor((Date.now() - recordStartedAt.current) / 1000)
+      recordStartedAt.current = null
+    }
+    setElapsed(pausedAccumulated.current)
+    if (text.trim()) setTranscriptEdit(text.trim())
+    setPhase('paused')
+    setStatusDetail('已暂停，可继续录音或结束')
+  }
+
+  function resumeRecording() {
+    speech.clearError()
+    recordStartedAt.current = Date.now()
+    setPhase('recording')
+    setStatusDetail(null)
+    speech.resume('zh-CN')
+  }
+
+  function endRecording() {
+    const text = speech.listening || speech.paused ? speech.stop() : transcriptEdit
     recordStartedAt.current = null
-    if (text.trim()) {
-      setTranscriptEdit(text.trim())
+    pausedAccumulated.current = 0
+    const finalText = text.trim() || transcriptEdit.trim()
+    if (finalText) {
+      setTranscriptEdit(finalText)
       setPhase('transcript_ready')
-      setStatusDetail('转写完成，可编辑后生成草稿')
+      persistTranscript(finalText)
+      setStatusDetail('转写完成，可直接点击内容修改或进行 AI 总结')
     } else {
       setPhase('recognition_failed')
-      setStatusDetail('未识别到有效语音')
-      setKeyboardMode(true)
+      setStatusDetail('未识别到有效语音，可在内容区手动补充')
     }
   }
 
   function cancelRecording() {
     speech.cancel()
     recordStartedAt.current = null
+    pausedAccumulated.current = 0
     setElapsed(0)
     setPhase('idle')
     setStatusDetail('已取消录音')
   }
 
-  function toggleMic() {
-    if (phase === 'recording' || speech.listening) {
-      stopRecording()
-      return
+  function persistTranscript(raw: string, opts?: { quiet?: boolean }) {
+    const trimmed = raw.trim()
+    if (!trimmed) return
+    const existing = drafts.find((d) => d.kind === 'activity')
+    if (existing && existing.kind === 'activity') {
+      const next: DraftPayload = {
+        ...existing,
+        transcript: trimmed,
+        summary: existing.summary || trimmed,
+        subject: existing.subject || `拜访 · ${contextAccount?.accountName || '客户'}`,
+        updatedAt: new Date().toISOString(),
+        accountRef: contextAccount?.accountRef || existing.accountRef,
+        accountName: contextAccount?.accountName || existing.accountName,
+      }
+      updateDraft(next)
+    } else {
+      const now = new Date().toISOString()
+      const accountName = contextAccount?.accountName || '待补充客户'
+      const draft: DraftPayload = {
+        kind: 'activity',
+        idempotencyKey: `local_activity_${Date.now()}`,
+        syncStatus: 'Draft',
+        createdAt: now,
+        updatedAt: now,
+        subject: `拜访 · ${accountName}`,
+        summary: trimmed,
+        visitType: 'Visit',
+        accountName,
+        accountRef: contextAccount?.accountRef,
+        contactName: '待补充',
+        followUpAt: '',
+        transcript: trimmed,
+        confidence: 0.55,
+        sources: [{ kind: 'other', label: '语音转写', ref: 'speech' }],
+        agentName: '现场录入',
+      }
+      upsertDraft(draft)
+      setDrafts((prev) => [...prev.filter((d) => d.kind !== 'activity'), draft])
+      onDraftsCommitted?.([draft, ...drafts.filter((d) => d.kind !== 'activity')])
     }
-    startRecording()
+    setSavedHint(true)
+    setPhase('transcript_ready')
+    if (!opts?.quiet) {
+      setStatusDetail('内容已自动保存')
+    }
+  }
+
+  function scheduleAutoSave(value: string) {
+    if (autoSaveTimer.current != null) {
+      window.clearTimeout(autoSaveTimer.current)
+    }
+    autoSaveTimer.current = window.setTimeout(() => {
+      autoSaveTimer.current = null
+      persistTranscript(value, { quiet: true })
+    }, 500)
+  }
+
+  function handleContentChange(value: string) {
+    setTranscriptEdit(value)
+    speech.setTranscript(value)
+    setSavedHint(false)
+    if (value.trim() && phase !== 'processing' && phase !== 'submitting' && !isRecordingSession) {
+      setPhase('transcript_ready')
+      scheduleAutoSave(value)
+    }
   }
 
   function updateDraft(next: DraftPayload) {
@@ -467,10 +715,15 @@ export function ActivityCapture({
     speech.cancel()
     speech.reset()
     recordStartedAt.current = null
+    pausedAccumulated.current = 0
     setElapsed(0)
     setTranscriptEdit('')
     setDrafts([])
+    setAiSummary('')
     setUsedMockSync(false)
+    setSavedHint(false)
+    setAccountPickerOpen(false)
+    setViewStep(0)
     setStatusDetail('已清空，可重新录入')
     setPhase('idle')
   }
@@ -495,54 +748,130 @@ export function ActivityCapture({
       />
 
       <ol className="capture-screen__steps" aria-label="录入进度">
-        {STEPS.map((step, i) => (
-          <li
-            key={step.key}
-            className={[i < stepIndex ? 'is-done' : '', i === stepIndex ? 'is-active' : '']
-              .filter(Boolean)
-              .join(' ')}
-          >
-            <span className="capture-screen__step-dot">
-              {i < stepIndex ? <IconCheck /> : i + 1}
-            </span>
-            <span>{step.label}</span>
-          </li>
-        ))}
+        {STEPS.map((step, i) => {
+          const reachable = canOpenStep(i)
+          const lockedByRecording =
+            (phase === 'recording' || phase === 'paused') && i !== stepIndex
+          return (
+            <li
+              key={step.key}
+              className={[
+                i < derivedStep ? 'is-done' : '',
+                i === stepIndex ? 'is-active' : '',
+                !reachable || lockedByRecording ? 'is-disabled' : 'is-clickable',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            >
+              <button
+                type="button"
+                className="capture-screen__step-btn"
+                aria-current={i === stepIndex ? 'step' : undefined}
+                aria-disabled={!reachable || lockedByRecording}
+                disabled={!reachable || lockedByRecording}
+                onClick={() => goToStep(i)}
+              >
+                <span className="capture-screen__step-dot">
+                  {i < derivedStep ? <IconCheck /> : i + 1}
+                </span>
+                <span>{step.label}</span>
+              </button>
+            </li>
+          )
+        })}
       </ol>
 
-      {contextAccount ? (
-        <article className="capture-screen__account">
+      {!isConfirmStep ? (
+      <div className={`capture-screen__account-wrap${accountPickerOpen ? ' is-open' : ''}`}>
+        <button
+          type="button"
+          className={`capture-screen__account capture-screen__account--select${
+            accountPickerOpen ? ' is-open' : ''
+          }`}
+          aria-expanded={accountPickerOpen}
+          aria-haspopup="listbox"
+          onClick={() => setAccountPickerOpen((v) => !v)}
+        >
           <span className="capture-screen__account-icon" aria-hidden>
             <IconBuilding />
           </span>
           <div className="capture-screen__account-body">
             <div className="capture-screen__account-head">
-              <strong>{contextAccount.accountName}</strong>
-              <span className="status-pill status-pill--strong">信用 {contextAccount.creditRating}</span>
+              <strong>{contextAccount?.accountName || '选择拜访客户'}</strong>
+              {contextAccount ? (
+                <span className="status-pill status-pill--strong">
+                  信用 {contextAccount.creditRating}
+                </span>
+              ) : (
+                <span className="status-pill">未选择</span>
+              )}
             </div>
-            <p>
-              近 30 天 {contextAccount.visitCount30d} 次拜访
-              {contextAccount.npsDelta ? ` · NPS ${contextAccount.npsDelta}` : ''}
-            </p>
-            {contextAccount.lastContactAt ? (
-              <p className="capture-screen__account-meta">上次接触 {contextAccount.lastContactAt}</p>
-            ) : null}
+            {contextAccount ? (
+              <>
+                <p>
+                  近 30 天 {contextAccount.visitCount30d} 次拜访
+                  {contextAccount.npsDelta ? ` · NPS ${contextAccount.npsDelta}` : ''}
+                  {contextAccount.lastContactAt ? ` · 上次 ${contextAccount.lastContactAt}` : ''}
+                </p>
+                <div className="capture-screen__account-chips">
+                  <span className="metric-chip">拜访 {contextAccount.visitCount30d}</span>
+                  <span className="metric-chip">
+                    开放商机 {contextAccount.openOpportunities.length}
+                  </span>
+                  {contextAccount.openOpportunities[0] ? (
+                    <span className="metric-chip metric-chip--accent">
+                      {contextAccount.openOpportunities[0].name}
+                    </span>
+                  ) : null}
+                </div>
+              </>
+            ) : (
+              <p>点击选择本次拜访的客户</p>
+            )}
           </div>
-          <div className="capture-screen__account-chips">
-            <span className="metric-chip">拜访 {contextAccount.visitCount30d}</span>
-            <span className="metric-chip">开放商机 {contextAccount.openOpportunities.length}</span>
-            {contextAccount.openOpportunities[0] ? (
-              <span className="metric-chip metric-chip--accent">
-                {contextAccount.openOpportunities[0].name}
-              </span>
-            ) : null}
-          </div>
-        </article>
+          <span className="capture-screen__account-chevron" aria-hidden>
+            <IconChevronDown />
+          </span>
+        </button>
+
+        {accountPickerOpen ? (
+          <ul className="capture-screen__account-menu" role="listbox" aria-label="选择客户">
+            {accountOptions.map((account) => {
+              const selected = account.accountRef === selectedAccountRef
+              return (
+                <li key={account.accountRef} role="option" aria-selected={selected}>
+                  <button
+                    type="button"
+                    className={`capture-screen__account-option${selected ? ' is-selected' : ''}`}
+                    onClick={() => selectAccount(account)}
+                  >
+                    <span className="capture-screen__account-option-icon" aria-hidden>
+                      <IconBuilding />
+                    </span>
+                    <span className="capture-screen__account-option-body">
+                      <strong>{account.accountName}</strong>
+                      <span>
+                        信用 {account.creditRating}
+                        {account.visitCount30d != null
+                          ? ` · 近 30 天 ${account.visitCount30d} 次`
+                          : ''}
+                      </span>
+                    </span>
+                    {selected ? <IconCheck /> : null}
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        ) : null}
+      </div>
       ) : null}
 
-      {/* Single primary capture panel — no duplicate empty-state card */}
+      {!isConfirmStep ? (
       <article
-        className={`capture-screen__hero${phase === 'recording' ? ' is-listening' : ''}`}
+        className={`capture-screen__hero${isRecordingSession ? ' is-listening' : ''}${
+          phase === 'paused' ? ' is-paused' : ''
+        }`}
         aria-labelledby="capture-hero-title"
       >
         <div className="capture-screen__hero-copy">
@@ -553,8 +882,10 @@ export function ActivityCapture({
             <h2 id="capture-hero-title">一句话记下这次拜访</h2>
             <p>
               {phase === 'recording'
-                ? `录音中 ${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')} · 点击麦克风可停止`
-                : '点击开始录音，或改用键盘。确认后再同步 SAP，不直写。'}
+                ? `录音中 ${formatElapsed(elapsed)} · 可暂停或结束`
+                : phase === 'paused'
+                  ? `已暂停 ${formatElapsed(elapsed)} · 可继续或结束`
+                  : '语音转写实时显示在下方，确认后再同步 SAP。'}
             </p>
           </div>
         </div>
@@ -568,150 +899,158 @@ export function ActivityCapture({
           <span>{statusDetail || phaseMeta.detail}</span>
         </div>
 
-        {phase === 'recording' ? (
-          <div className="capture-screen__rec-bar">
-            <span className="capture-screen__live" aria-hidden>
-              录制中
-            </span>
-            <span className="capture-screen__rec-time" aria-live="polite">
-              {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
-            </span>
-            <button type="button" className="btn btn--accent" onClick={stopRecording}>
-              停止
-            </button>
-            <button type="button" className="btn btn--ghost" onClick={cancelRecording}>
-              取消
-            </button>
+        <div className="capture-screen__content">
+          <div className="capture-screen__content-head">
+            <div className="capture-screen__content-title">
+              <strong>转写内容</strong>
+              {phase === 'recording' ? <span className="capture-screen__live">识别中</span> : null}
+              {phase === 'paused' ? <span className="capture-screen__paused-pill">已暂停</span> : null}
+              {savedHint ? <span className="capture-screen__saved-pill">已保存</span> : null}
+            </div>
+            <div className="capture-screen__content-actions">
+              <button
+                type="button"
+                className="chip-btn"
+                disabled={contentLocked || !hasContent || phase === 'processing'}
+                onClick={() => {
+                  void generateDrafts(displayTranscript)
+                }}
+              >
+                <IconSpark /> AI 总结
+              </button>
+            </div>
           </div>
-        ) : null}
 
-        {phase !== 'recording' ? (
+          {isRecordingSession ? (
+            <div
+              className={`capture-screen__content-display${hasContent ? '' : ' is-empty'}`}
+              role="region"
+              aria-label="实时转写"
+            >
+              {hasContent ? (
+                <p>{displayTranscript}</p>
+              ) : (
+                <p className="capture-screen__content-placeholder">正在聆听，转写内容会实时显示…</p>
+              )}
+            </div>
+          ) : (
+            <textarea
+              ref={contentAreaRef}
+              className="capture-screen__content-input"
+              rows={5}
+              aria-label="转写内容"
+              placeholder="点击此处直接修改转写内容，或下方开始录音…"
+              value={transcriptEdit}
+              disabled={phase === 'processing' || phase === 'submitting'}
+              onChange={(e) => handleContentChange(e.target.value)}
+              onBlur={() => {
+                if (transcriptEdit.trim()) persistTranscript(transcriptEdit, { quiet: true })
+              }}
+            />
+          )}
+
+          {aiSummary ? (
+            <div
+              id="capture-ai-summary"
+              className="capture-screen__ai-summary"
+              role="region"
+              aria-label="AI 总结结果"
+            >
+              <div className="capture-screen__ai-summary-head">
+                <span className="capture-screen__ai-summary-icon" aria-hidden>
+                  <IconSpark />
+                </span>
+                <strong>AI 总结结果</strong>
+              </div>
+              <p className="capture-screen__ai-summary-body">{aiSummary}</p>
+            </div>
+          ) : null}
+        </div>
+
+        {!isRecordingSession ? (
           <div className="capture-screen__mic">
             <MicButton
               listening={false}
               disabled={phase === 'processing' || phase === 'submitting'}
-              onToggle={toggleMic}
+              onToggle={startRecording}
               idleLabel={speech.supported ? '点击开始录音' : '语音不可用'}
             />
           </div>
         ) : (
-          <div className="capture-screen__mic">
-            <MicButton
-              listening
-              elapsedSeconds={elapsed}
-              onToggle={toggleMic}
-              idleLabel="点击停止"
-            />
+          <div className="capture-screen__rec-controls" role="group" aria-label="录音控制">
+            <div className="capture-screen__rec-meta">
+              <span
+                className={`capture-screen__live${phase === 'paused' ? ' is-paused' : ''}`}
+                aria-hidden
+              >
+                {phase === 'paused' ? '已暂停' : '录制中'}
+              </span>
+              <span className="capture-screen__rec-time" aria-live="polite">
+                {formatElapsed(elapsed)}
+              </span>
+            </div>
+            <div className="capture-screen__rec-buttons">
+              {phase === 'recording' ? (
+                <button type="button" className="btn btn--ghost capture-screen__rec-btn" onClick={pauseRecording}>
+                  <IconPause /> 暂停
+                </button>
+              ) : (
+                <button type="button" className="btn btn--accent capture-screen__rec-btn" onClick={resumeRecording}>
+                  <IconPlay /> 继续
+                </button>
+              )}
+              <button type="button" className="btn btn--accent capture-screen__rec-btn" onClick={endRecording}>
+                <IconStop /> 结束
+              </button>
+              <button type="button" className="btn btn--ghost capture-screen__rec-btn" onClick={cancelRecording}>
+                取消
+              </button>
+            </div>
           </div>
         )}
 
         <p className="capture-screen__privacy muted">
-          语音识别由浏览器提供，通常需联网并将音频送至识别服务；本应用不会在未确认前写入 SAP。
+          语音识别由浏览器提供，通常需联网；确认前不会写入 SAP。
         </p>
 
-        <div className="capture-screen__toolbar">
-          <button
-            type="button"
-            className={`chip-btn${keyboardMode ? ' is-active' : ''}`}
-            onClick={() => setKeyboardMode((v) => !v)}
-          >
-            {keyboardMode ? '收起键盘' : '改用键盘'}
-          </button>
-          {opportunityDrafts.length > 0 && onOpenOpportunity ? (
-            <button type="button" className="chip-btn is-active" onClick={onOpenOpportunity}>
-              <IconEye /> 查看商机
-            </button>
-          ) : null}
-          {offlinePending > 0 ? (
-            <button
-              type="button"
-              className="chip-btn"
-              disabled={!isOnline() || phase === 'processing'}
-              onClick={() => {
-                void flushOffline()
-              }}
-            >
-              补传离线（{offlinePending}）
-            </button>
-          ) : null}
-        </div>
-
-        {keyboardMode || phase === 'permission_denied' || !speech.supported ? (
-          <div className="capture-screen__keyboard">
-            <label className="capture-screen__keyboard-label" htmlFor="capture-transcript-input">
-              键盘输入 / 编辑转写
-            </label>
-            <textarea
-              id="capture-transcript-input"
-              rows={3}
-              placeholder="例如：刚拜访完仁济张主任，对 N17 感兴趣，要 12 台…"
-              value={transcriptEdit}
-              disabled={phase === 'processing' || phase === 'submitting' || phase === 'recording'}
-              onChange={(e) => {
-                setTranscriptEdit(e.target.value)
-                if (e.target.value.trim() && phase !== 'processing') {
-                  setPhase('transcript_ready')
-                }
-              }}
-            />
-            <div className="capture-screen__fallback-actions">
+        {(opportunityDrafts.length > 0 && onOpenOpportunity) || offlinePending > 0 ? (
+          <div className="capture-screen__toolbar">
+            {opportunityDrafts.length > 0 && onOpenOpportunity ? (
+              <button type="button" className="chip-btn is-active" onClick={onOpenOpportunity}>
+                <IconEye /> 查看商机
+              </button>
+            ) : null}
+            {offlinePending > 0 ? (
               <button
                 type="button"
-                className="btn btn--accent"
-                disabled={phase === 'processing' || phase === 'submitting' || !transcriptEdit.trim()}
+                className="chip-btn"
+                disabled={!isOnline() || phase === 'processing'}
                 onClick={() => {
-                  void generateDrafts(transcriptEdit)
+                  void flushOffline()
                 }}
               >
-                生成草稿
+                补传离线（{offlinePending}）
               </button>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                disabled={phase === 'processing' || phase === 'submitting'}
-                onClick={() => {
-                  setTranscriptEdit(DEMO_UTTERANCE)
-                  setPhase('transcript_ready')
-                  void generateDrafts(DEMO_UTTERANCE)
-                }}
-              >
-                仁济示例
-              </button>
-            </div>
+            ) : null}
           </div>
         ) : null}
       </article>
+      ) : null}
 
-      {!keyboardMode && (phase === 'transcript_ready' || phase === 'processing' || drafts.length > 0) ? (
-        <div className="capture-screen__transcript">
-          <div className="capture-screen__transcript-head">
-            <strong>转写内容（可编辑）</strong>
-            {phase === 'recording' ? <span className="capture-screen__live">识别中</span> : null}
+      {isConfirmStep && aiSummary ? (
+        <div
+          id="capture-ai-summary"
+          className="capture-screen__ai-summary capture-screen__ai-summary--confirm"
+          role="region"
+          aria-label="AI 总结结果"
+        >
+          <div className="capture-screen__ai-summary-head">
+            <span className="capture-screen__ai-summary-icon" aria-hidden>
+              <IconSpark />
+            </span>
+            <strong>AI 总结结果</strong>
           </div>
-          <textarea
-            rows={3}
-            aria-label="转写内容"
-            value={displayTranscript}
-            disabled={phase === 'processing' || phase === 'submitting' || phase === 'recording'}
-            onChange={(e) => {
-              setTranscriptEdit(e.target.value)
-              speech.setTranscript(e.target.value)
-            }}
-          />
-          {phase === 'transcript_ready' && drafts.length === 0 ? (
-            <div className="capture-screen__fallback-actions">
-              <button
-                type="button"
-                className="btn btn--accent"
-                disabled={!transcriptEdit.trim()}
-                onClick={() => {
-                  void generateDrafts(transcriptEdit)
-                }}
-              >
-                生成草稿
-              </button>
-            </div>
-          ) : null}
+          <p className="capture-screen__ai-summary-body">{aiSummary}</p>
         </div>
       ) : null}
 
@@ -733,7 +1072,20 @@ export function ActivityCapture({
         </p>
       ) : null}
 
-      {drafts.length > 0 ? (
+      {isConfirmStep && drafts.length === 0 ? (
+        <article className="capture-screen__empty" aria-live="polite">
+          <span className="capture-screen__empty-icon" aria-hidden>
+            <IconSpark />
+          </span>
+          <h3>暂无待确认草稿</h3>
+          <p>请先在「口述 / 转写」完成录音与 AI 总结，生成草稿后再回来确认。</p>
+          <button type="button" className="btn btn--accent" onClick={() => goToStep(0)}>
+            返回口述
+          </button>
+        </article>
+      ) : null}
+
+      {isConfirmStep && drafts.length > 0 ? (
         <div className="capture-screen__drafts">
           <div className="capture-screen__drafts-head">
             <div>

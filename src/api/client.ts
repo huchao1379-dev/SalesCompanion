@@ -79,6 +79,8 @@ export const api = {
     request<{
       ok: boolean
       deepseek: boolean
+      vision?: boolean
+      visionModel?: string
       aiProvider?: 'deepseek' | 'copilotstudio'
       copilotstudio?: boolean
       dataverseMode: string
@@ -90,6 +92,7 @@ export const api = {
       locale?: string
       context?: Record<string, string>
       turnId?: string
+      attachments?: Array<{ name: string; mimeType: string; dataBase64: string }>
     },
     init?: { signal?: AbortSignal },
   ) =>
@@ -103,6 +106,8 @@ export const api = {
       utterance: string
       locale?: string
       context?: Record<string, string>
+      turnId?: string
+      attachments?: Array<{ name: string; mimeType: string; dataBase64: string }>
     },
     init?: { signal?: AbortSignal },
   ) =>
@@ -141,6 +146,69 @@ export const api = {
       note?: string
     }>('/opportunities'),
   logs: () => request<{ logs: unknown[] }>('/logs'),
+  activityInsight: (body: {
+    activity: {
+      id: string
+      title: string
+      type: string
+      status: string
+      time?: string
+      location?: string
+      orgName: string
+      orgIndustry?: string
+      notes?: string
+      contacts?: Array<{ name: string; role?: string }>
+    }
+    recentVisits?: Array<{
+      title: string
+      time?: string
+      status?: string
+      notes?: string
+    }>
+    refreshNonce?: string
+  }) =>
+    request<{
+      summary: string
+      signals: Array<{
+        id: string
+        label: string
+        value: string
+        tone: 'neutral' | 'positive' | 'pending' | 'risk' | 'ai'
+        source: 'activity' | 'opportunity' | 'visit' | 'ai' | 'derived'
+      }>
+      pendingChecks: Array<{
+        id: string
+        text: string
+        source: 'missing_crm_field' | 'activity_notes' | 'ai' | 'opportunity' | 'visit'
+      }>
+      actions: Array<{
+        id: string
+        title: string
+        description?: string
+        priority: 'immediate' | 'this_week' | 'later'
+        ownerName?: string | null
+        contactName?: string | null
+        dueAt?: string | null
+        dueLabel?: string | null
+        source?: string
+        actionType?: 'follow_up' | 'log_activity' | 'opportunity' | 'meeting' | 'material' | 'other'
+      }>
+      evidence: {
+        activityIncluded: boolean
+        opportunityCount: number
+        recentVisitCount: number
+        crmUpdatedAt: string | null
+      }
+      updatedAt: string
+      mode: 'deepseek' | 'heuristic' | 'copilotstudio'
+      agentName: string
+      opportunityCount?: number
+      visitCount?: number
+      confidence?: number
+    }>('/activity-insight', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 }
 
 export { API_BASE }

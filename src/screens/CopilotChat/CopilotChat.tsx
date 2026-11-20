@@ -6,6 +6,7 @@ import type {
   AgentStep,
   DraftPayload,
   MessageFailureKind,
+  OrchestratorAttachment,
 } from '../../agents/types'
 import { copilotOrchestrate } from '../../agents/copilotStudioClient'
 import { getOrchestratorMode, orchestrate } from '../../agents/orchestratorClient'
@@ -19,6 +20,7 @@ import {
   IconSpark,
   IconStop,
 } from '../../components/DashIcons'
+import { IconButton } from '../../components/IconButton'
 import { MessageUiCard } from '../../components/MessageUiCard'
 import { SourceChips } from '../../components/SourceChips'
 import {
@@ -57,26 +59,28 @@ const BOT_NAME = 'Copilot'
 const NEAR_BOTTOM_PX = 96
 const TIME_GROUP_MS = 2 * 60 * 1000
 
+/** Honest pending labels — not tied to a specific domain agent. */
 const PROGRESS_PHASES = [
-  { afterMs: 0, label: '正在理解你的意图' },
-  { afterMs: 1200, label: '正在查询客户与商机' },
-  { afterMs: 3200, label: '正在生成草稿与建议' },
+  { afterMs: 0, label: '正在理解你的问题' },
+  { afterMs: 1600, label: '正在调用相关能力' },
+  { afterMs: 4200, label: '正在整理答复' },
 ] as const
 
 const HELP_ITEMS = [
-  '一句话录入拜访，自动生成活动与商机草稿',
-  '查客户画像、信用与开放商机，并标注来源',
-  '查订单物流，或把今天的拜访写成日报素材',
+  '一句话录入拜访，生成活动与商机草稿',
+  '查询客户画像、信用与开放商机（带来源）',
+  '查询订单物流，或把今日跟进写成日报素材',
+  '上传图片 / 文本附件，结合内容一起处理',
 ]
 
 const QUICK_CHIPS = [
   {
-    label: '录入仁济拜访',
-    prompt:
-      '刚拜访完上海仁济医院张主任，他对监护仪 N17 感兴趣，要 12 台，下周三再约一次定标书细节。',
+    label: '录入拜访',
+    prompt: '刚拜访完客户，对方对产品有兴趣，想约下周再谈细节，帮我生成活动草稿。',
   },
-  { label: '仁济最近怎么样', prompt: '仁济医院最近怎么样？' },
-  { label: '查订单物流', prompt: '查一下仁济医院上个订单的物流' },
+  { label: '查客户画像', prompt: '帮我看看这家客户最近怎么样，信用和开放商机如何？' },
+  { label: '查订单物流', prompt: '查一下最近一笔订单的物流进度。' },
+  { label: '写今日小结', prompt: '根据今天的跟进帮我写一段工作小结。' },
 ] as const
 
 type Props = {
@@ -97,6 +101,37 @@ function formatBytes(n: number) {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = String(reader.result || '')
+      const comma = result.indexOf(',')
+      resolve(comma >= 0 ? result.slice(comma + 1) : result)
+    }
+    reader.onerror = () => reject(reader.error || new Error('read failed'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function toOrchestratorAttachments(
+  list: PendingAttachment[],
+): Promise<OrchestratorAttachment[]> {
+  const out: OrchestratorAttachment[] = []
+  for (const item of list) {
+    try {
+      out.push({
+        name: item.name,
+        mimeType: item.file.type || (item.kind === 'image' ? 'image/jpeg' : 'application/octet-stream'),
+        dataBase64: await fileToBase64(item.file),
+      })
+    } catch {
+      /* Skip unreadable files; user still sees the name in the bubble. */
+    }
+  }
+  return out
 }
 
 function uid(prefix: string) {
@@ -391,9 +426,20 @@ function NativeChat({
     })
   }
 
-  function startProgressTicker(assistantId: string, generationId: number) {
+  function startProgressTicker(
+    assistantId: string,
+    generationId: number,
+    hasAttachments: boolean,
+  ) {
     const timers: number[] = []
-    for (const phase of PROGRESS_PHASES) {
+    const phases = hasAttachments
+      ? [
+          { afterMs: 0, label: '正在理解附件与问题' },
+          { afterMs: 1800, label: '正在调用相关能力' },
+          { afterMs: 4500, label: '正在整理答复' },
+        ]
+      : PROGRESS_PHASES
+    for (const phase of phases) {
       if (phase.afterMs === 0) continue
       const t = window.setTimeout(() => {
         const handle = genRef.current
@@ -408,7 +454,10 @@ function NativeChat({
     return () => timers.forEach((t) => window.clearTimeout(t))
   }
 
-  async function runGeneration(utterance: string, opts?: { retryAssistantId?: string }) {
+  async function runGeneration(
+    utterance: string,
+    opts?: { retryAssistantId?: string; attachments?: OrchestratorAttachment[] },
+  ) {
     // Guard with refs to avoid double-submit from stale closures.
     if (genRef.current) return
 
@@ -416,6 +465,8 @@ function NativeChat({
     const controller = new AbortController()
     const generationId = ++genSeqRef.current
     const assistantId = opts?.retryAssistantId || uid('asst')
+    const requestAttachments = opts?.attachments?.length ? opts.attachments : undefined
+    const hasAttachments = Boolean(requestAttachments?.length)
 
     // Reserve the slot immediately so a second Enter cannot start another turn.
     genRef.current = {
@@ -438,7 +489,7 @@ function NativeChat({
       confidence: 0,
       createdAt: stamp,
       deliveryStatus: 'pending',
-      progressLabel: PROGRESS_PHASES[0].label,
+      progressLabel: hasAttachments ? '正在理解附件与问题' : PROGRESS_PHASES[0].label,
       retryUtterance: utterance,
     }
 
@@ -463,7 +514,7 @@ function NativeChat({
     setConversationState(base)
 
     const handle = genRef.current!
-    const stopTicker = startProgressTicker(assistantId, generationId)
+    const stopTicker = startProgressTicker(assistantId, generationId, hasAttachments)
 
     try {
       const runAgent = CHAT_PROVIDER === 'deepseek' ? orchestrate : copilotOrchestrate
@@ -471,6 +522,7 @@ function NativeChat({
         {
           utterance,
           turnId: assistantId,
+          attachments: requestAttachments,
           context: {
             ...conversationRef.current.context,
             conversationId: conversationRef.current.conversationId,
@@ -619,6 +671,16 @@ function NativeChat({
         : `【附件 ${pending.length}】${pending.map((a) => `${a.name}（${a.sizeLabel}）`).join('、')}`
     const utterance = [attachLine, trimmed || '请结合附件帮我处理'].filter(Boolean).join('\n')
 
+    let payloadAttachments: OrchestratorAttachment[] = []
+    if (pending.length) {
+      try {
+        payloadAttachments = await toOrchestratorAttachments(pending)
+      } catch {
+        setVoiceHint('附件读取失败，请重试或改用文字说明。')
+        return
+      }
+    }
+
     const stamp = new Date().toISOString()
     const userMsg: AgentMessage = {
       id: uid('user'),
@@ -640,7 +702,9 @@ function NativeChat({
     const withUser = appendMessages(conversationRef.current, [userMsg])
     setConversationState(withUser)
     stickToBottomRef.current = true
-    await runGeneration(utterance)
+    await runGeneration(utterance, {
+      attachments: payloadAttachments.length ? payloadAttachments : undefined,
+    })
   }
 
   function stopGeneration() {
@@ -745,9 +809,14 @@ function NativeChat({
     <section className={`chat-screen${isEmpty ? ' is-empty' : ''}`} aria-busy={busy || generating}>
       <header className="chat-screen__top">
         {onBack ? (
-          <button type="button" className="chat-screen__back" aria-label="返回" onClick={onBack}>
+          <IconButton
+            className="chat-screen__back"
+            squared
+            aria-label="返回"
+            onClick={onBack}
+          >
             <IconBack />
-          </button>
+          </IconButton>
         ) : (
           <span className="chat-screen__back-spacer" />
         )}
@@ -787,7 +856,7 @@ function NativeChat({
               </ol>
             </div>
             <p className="chat-empty__hint">
-              输入问题，或点麦克风切换语音；语音模式下长按识别。Enter 发送，Shift+Enter 换行。
+              输入问题、点快捷入口，或上传图片/文本附件。麦克风可切换语音输入。Enter 发送，Shift+Enter 换行。
             </p>
           </div>
         ) : (
@@ -908,6 +977,27 @@ function NativeChat({
                             >
                               重试
                             </button>
+                            {m.failureKind === 'query' || m.failureKind === 'unknown' ? (
+                              <button
+                                type="button"
+                                className="chat-bubble__retry is-secondary"
+                                onClick={() => {
+                                  setInput('换个说法：请说明客户名称和我想查的内容')
+                                  window.setTimeout(() => inputRef.current?.focus(), 40)
+                                }}
+                              >
+                                换种说法
+                              </button>
+                            ) : null}
+                            {accountKey && onOpenAccount ? (
+                              <button
+                                type="button"
+                                className="chat-bubble__retry is-secondary"
+                                onClick={() => onOpenAccount(accountKey)}
+                              >
+                                去客户画像
+                              </button>
+                            ) : null}
                           </div>
                         ) : null}
 
@@ -952,7 +1042,6 @@ function NativeChat({
                                 onClick={() => onOpenAccount?.(accountKey)}
                               >
                                 查看客户画像
-                                <span aria-hidden>→</span>
                               </button>
                             ) : null}
                           </div>
@@ -1095,8 +1184,8 @@ function NativeChat({
           <button
             type="button"
             className={`chat-dock__attach${attachments.length ? ' is-active' : ''}`}
-            aria-label="添加附件（仅记录文件名，不解析内容）"
-            title="附件仅记录文件名，不解析内容"
+            aria-label="添加附件（图片将尝试识别，文本会读入内容）"
+            title="可上传图片或文本；图片需服务端配置 VISION_MODEL 才能识图像素"
             disabled={busy || generating || attachments.length >= ATTACH_MAX_COUNT}
             onClick={() => fileInputRef.current?.click()}
           >

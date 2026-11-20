@@ -10,6 +10,7 @@ import {
   IconPlus,
   IconRefresh,
 } from '../../components/DashIcons'
+import { EmptyState } from '../../components/EmptyState'
 import { ScreenHeader } from '../../components/ScreenHeader'
 import { SourceChips } from '../../components/SourceChips'
 import { SyncStatusBadge } from '../../components/SyncStatusBadge'
@@ -171,12 +172,17 @@ export function AccountInsight({
     return (
       <section className="account-profile" aria-label="客户画像">
         <ScreenHeader className="screen-header--flush" eyebrow="客户画像" title="无访问权限" onBack={onBack} />
-        <div className="account-profile__empty">
-          <p>你没有查看该客户的权限。请联系管理员开通 CRM 访问。</p>
-          <button type="button" className="btn btn--ghost" onClick={onBack}>
-            返回
-          </button>
-        </div>
+        <EmptyState
+          className="account-profile__empty"
+          compact
+          title="无访问权限"
+          description="你没有查看该客户的权限。请联系管理员开通 CRM 访问。"
+          actions={
+            <button type="button" className="btn btn--ghost" onClick={onBack}>
+              返回
+            </button>
+          }
+        />
       </section>
     )
   }
@@ -200,17 +206,24 @@ export function AccountInsight({
             </button>
           }
         />
-        <div className="account-profile__empty">
-          <p>{error === 'network' ? '网络异常且无可用 Mock。' : '未找到客户画像。'}</p>
-          <div className="account-profile__empty-actions">
-            <button type="button" className="btn btn--accent" onClick={() => void reload()}>
-              重试
-            </button>
-            <button type="button" className="btn btn--ghost" onClick={onBack}>
-              返回
-            </button>
-          </div>
-        </div>
+        <EmptyState
+          className="account-profile__empty"
+          compact
+          title={error === 'network' ? '网络异常' : '未找到客户'}
+          description={
+            error === 'network' ? '网络异常且无可用 Mock，请检查连接后重试。' : '未找到客户画像。'
+          }
+          actions={
+            <>
+              <button type="button" className="btn btn--accent" onClick={() => void reload()}>
+                重试
+              </button>
+              <button type="button" className="btn btn--ghost" onClick={onBack}>
+                返回
+              </button>
+            </>
+          }
+        />
       </section>
     )
   }

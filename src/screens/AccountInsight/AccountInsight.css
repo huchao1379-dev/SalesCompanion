@@ -620,6 +620,12 @@
   border-radius: var(--radius);
 }
 
+.account-profile__empty.ui-empty {
+  margin: var(--space-4);
+  width: auto;
+  box-sizing: border-box;
+}
+
 .account-profile__empty-actions {
   display: flex;
   flex-wrap: wrap;

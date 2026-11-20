@@ -10,6 +10,7 @@ import { opportunityCreateAgent } from './opportunityCreate.agent.js'
 import { orderQueryAgent } from './orderQuery.agent.js'
 import { workSummaryAgent } from './workSummary.agent.js'
 import { opportunitySupervisorAgent } from './opportunitySupervisor.agent.js'
+import { activityInsightAgent } from './activityInsight.agent.js'
 
 let booted = false
 
@@ -22,6 +23,7 @@ export function ensureAgentsRegistered(): void {
   register(opportunitySupervisorAgent)
   register(orderQueryAgent)
   register(workSummaryAgent)
+  register(activityInsightAgent)
   booted = true
 }
 

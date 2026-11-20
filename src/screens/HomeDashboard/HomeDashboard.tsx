@@ -9,6 +9,7 @@ import {
   IconPin,
   IconSun,
 } from '../../components/DashIcons'
+import { IconButton } from '../../components/IconButton'
 import { ProgressRing } from '../../components/ProgressRing'
 import {
   buildMonthEvents,
@@ -18,6 +19,16 @@ import {
 } from '../../data/agenda'
 import { listDrafts, refreshDraftsFromApi } from '../../data/dataverse'
 import { subscribeDrafts } from '../../data/draftStore'
+import {
+  formatDateKey,
+  formatTimeRange,
+  listInsightTasksForDate,
+  listInsightTaskDaysInMonth,
+  subscribeInsightTasks,
+  toggleInsightTaskDone,
+  type InsightTask,
+} from '../../data/insightTasks'
+import { PRIORITY_LABEL } from '../../data/activityInsight'
 import { computeHomeMetrics, fetchHomeMetrics, type HomeMetrics } from '../../data/metrics'
 import { useTheme } from '../../theme/ThemeContext'
 import './HomeDashboard.css'
@@ -59,7 +70,7 @@ function agendaIcon(type: CalEventType): ReactNode {
   return <IconPin />
 }
 
-function buildMonthGrid(now: Date, events: AgendaItem[]) {
+function buildMonthGrid(now: Date, events: AgendaItem[], taskDays: Set<number>) {
   const year = now.getFullYear()
   const month = now.getMonth()
   const first = new Date(year, month, 1)
@@ -73,16 +84,26 @@ function buildMonthGrid(now: Date, events: AgendaItem[]) {
     byDay.set(ev.day, list)
   })
 
-  const cells: Array<{ day: number | null; today: boolean; types: CalEventType[] }> = []
-  for (let i = 0; i < startPad; i += 1) cells.push({ day: null, today: false, types: [] })
+  const cells: Array<{
+    day: number | null
+    today: boolean
+    types: CalEventType[]
+    hasTask: boolean
+  }> = []
+  for (let i = 0; i < startPad; i += 1) {
+    cells.push({ day: null, today: false, types: [], hasTask: false })
+  }
   for (let d = 1; d <= daysInMonth; d += 1) {
     cells.push({
       day: d,
       today: d === now.getDate(),
       types: byDay.get(d) ?? [],
+      hasTask: taskDays.has(d),
     })
   }
-  while (cells.length % 7 !== 0) cells.push({ day: null, today: false, types: [] })
+  while (cells.length % 7 !== 0) {
+    cells.push({ day: null, today: false, types: [], hasTask: false })
+  }
   return cells
 }
 
@@ -96,6 +117,7 @@ export function HomeDashboard({
   const [metrics, setMetrics] = useState<HomeMetrics>(() => computeHomeMetrics(listDrafts()))
   const [selectedDay, setSelectedDay] = useState(() => new Date().getDate())
   const [agendaOpen, setAgendaOpen] = useState(false)
+  const [insightTasksTick, setInsightTasksTick] = useState(0)
   const messageCount = MOCK_MESSAGE_COUNT
   const messageBadge = messageCount > 99 ? '99+' : String(messageCount)
 
@@ -114,10 +136,23 @@ export function HomeDashboard({
     })
   }, [])
 
+  useEffect(() => {
+    return subscribeInsightTasks(() => {
+      setInsightTasksTick((n) => n + 1)
+    })
+  }, [])
+
   const monthLabel = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
   const dayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`
   const events = useMemo(() => buildMonthEvents(new Date(now)), [dayKey])
-  const calendarCells = useMemo(() => buildMonthGrid(new Date(now), events), [dayKey, events])
+  const taskDays = useMemo(
+    () => listInsightTaskDaysInMonth(now.getFullYear(), now.getMonth()),
+    [dayKey, insightTasksTick],
+  )
+  const calendarCells = useMemo(
+    () => buildMonthGrid(new Date(now), events, taskDays),
+    [dayKey, events, taskDays],
+  )
 
   /* eslint-disable react-hooks/set-state-in-effect -- keep the calendar selection aligned when the day rolls over. */
   useEffect(() => {
@@ -133,6 +168,18 @@ export function HomeDashboard({
         .sort((a, b) => a.time.localeCompare(b.time)),
     [events, selectedDay],
   )
+
+  const selectedDateKey = useMemo(() => {
+    const d = new Date(now.getFullYear(), now.getMonth(), selectedDay)
+    return formatDateKey(d)
+  }, [now, selectedDay])
+
+  const selectedInsightTasks = useMemo(
+    () => listInsightTasksForDate(selectedDateKey),
+    [selectedDateKey, insightTasksTick],
+  )
+
+  const agendaCount = selectedAgenda.length + selectedInsightTasks.length
 
   const isSelectedToday = selectedDay === now.getDate()
   const agendaTitle = isSelectedToday
@@ -178,25 +225,21 @@ export function HomeDashboard({
           <h1 className="dash__time">{formatClock(now)}</h1>
         </div>
         <div className="dash__actions" aria-label="快捷入口">
-          <button type="button" className="icon-btn" aria-label="今日播报" onClick={onOpenBrief}>
+          <IconButton aria-label="今日播报" onClick={onOpenBrief}>
             <IconBook />
-          </button>
-          <button
-            type="button"
-            className="icon-btn icon-btn--badge"
+          </IconButton>
+          <IconButton
             aria-label={`消息 ${messageBadge} 条`}
+            badge={messageCount > 0 ? messageBadge : undefined}
           >
             <IconBell />
-            {messageCount > 0 ? <span className="icon-btn__count">{messageBadge}</span> : null}
-          </button>
-          <button
-            type="button"
-            className="icon-btn"
+          </IconButton>
+          <IconButton
             aria-label={theme === 'dark' ? '切换为浅色模式' : '切换为深色模式'}
             onClick={toggleTheme}
           >
             {theme === 'dark' ? <IconSun /> : <IconMoon />}
-          </button>
+          </IconButton>
         </div>
       </header>
 
@@ -284,11 +327,12 @@ export function HomeDashboard({
                 }}
               >
                 <span className="cal-card__day-num">{cell.day}</span>
-                {cell.types.length > 0 ? (
+                {cell.types.length > 0 || cell.hasTask ? (
                   <span className="cal-card__dots" aria-hidden>
-                    {cell.types.slice(0, 3).map((t) => (
+                    {cell.types.slice(0, cell.hasTask ? 2 : 3).map((t) => (
                       <i key={t} className={`cal-dot ${EVENT_META[t].className}`} />
                     ))}
+                    {cell.hasTask ? <i className="cal-dot is-insight-task" /> : null}
                   </span>
                 ) : (
                   <span className="cal-card__dots cal-card__dots--spacer" aria-hidden />
@@ -321,7 +365,7 @@ export function HomeDashboard({
               <strong>{agendaTitle}</strong>
             </span>
             <span className="cal-agenda__head-right">
-              {selectedAgenda.length} tasks
+              {agendaCount} tasks
               <span className="cal-agenda__chevron" aria-hidden>
                 ›
               </span>
@@ -329,7 +373,7 @@ export function HomeDashboard({
           </button>
 
           {agendaOpen ? (
-            selectedAgenda.length === 0 ? (
+            agendaCount === 0 ? (
               <p className="cal-agenda__empty muted">该日暂无安排</p>
             ) : (
               <ul className="cal-agenda__list">
@@ -356,11 +400,54 @@ export function HomeDashboard({
                     </button>
                   </li>
                 ))}
+                {selectedInsightTasks.map((task) => (
+                  <li key={task.id}>
+                    <InsightTaskAgendaRow
+                      task={task}
+                      onToggle={() => toggleInsightTaskDone(task.id)}
+                    />
+                  </li>
+                ))}
               </ul>
             )
           ) : null}
         </div>
       </section>
     </section>
+  )
+}
+
+function InsightTaskAgendaRow({
+  task,
+  onToggle,
+}: {
+  task: InsightTask
+  onToggle: () => void
+}) {
+  const timeLabel = formatTimeRange(task.startTime || '09:00', task.endTime || '10:00')
+  return (
+    <button
+      type="button"
+      className={`cal-agenda__item cal-agenda__item--task${task.done ? ' is-done' : ''}`}
+      onClick={onToggle}
+      aria-pressed={task.done}
+      aria-label={task.done ? `取消完成：${task.title}` : `标记完成：${task.title}`}
+    >
+      <span className="cal-agenda__icon is-insight-task" aria-hidden>
+        <IconBook />
+      </span>
+      <span className="cal-agenda__body">
+        <span className="cal-agenda__title">{task.title}</span>
+        <span className="cal-agenda__meta">
+          {timeLabel}
+          {` · ${PRIORITY_LABEL[task.priority]}`}
+          {task.orgName ? ` · ${task.orgName}` : ''}
+          {task.description ? ` · ${task.description}` : ''}
+        </span>
+      </span>
+      <span className="cal-agenda__task-state" aria-hidden>
+        {task.done ? '已完成' : '待办'}
+      </span>
+    </button>
   )
 }

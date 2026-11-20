@@ -15,6 +15,7 @@ import {
   IconSpark,
   IconStop,
 } from '../../components/DashIcons'
+import { IconButton } from '../../components/IconButton'
 import { SheetScrim } from '../../components/SheetScrim'
 import { buildBriefChapters, type BriefChapter } from '../../data/brief'
 import { listDrafts } from '../../data/dataverse'
@@ -24,6 +25,8 @@ import { cancelSpeech, speakText, unlockSpeech } from '../../speech/tts'
 type Props = {
   open: boolean
   onClose: () => void
+  /** Bumped by parent inside a user gesture so mobile TTS autoplay is allowed. */
+  playRequestId?: number
 }
 
 const PAGE_COUNT = 4
@@ -50,7 +53,7 @@ function chapterToInsight(chapter: BriefChapter | undefined, index: number) {
   }
 }
 
-export function BriefMe({ open, onClose }: Props) {
+export function BriefMe({ open, onClose, playRequestId = 0 }: Props) {
   const [chapters, setChapters] = useState(() => buildBriefChapters(listDrafts()))
   const [page, setPage] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -123,6 +126,8 @@ export function BriefMe({ open, onClose }: Props) {
     setPlaying(false)
   }, [])
 
+  const pendingAutoRetryRef = useRef(false)
+
   const speakPage = useCallback((
     index: number,
     opts?: { fromUserGesture?: boolean; playlist?: boolean; autoPlay?: boolean },
@@ -146,6 +151,7 @@ export function BriefMe({ open, onClose }: Props) {
 
     if (fromUserGesture) {
       userArmedPlayRef.current = true
+      pendingAutoRetryRef.current = false
       unlockSpeech()
     } else if (!userArmedPlayRef.current) {
       // Playlist continuation is allowed only after open/refresh/play armed TTS.
@@ -172,6 +178,7 @@ export function BriefMe({ open, onClose }: Props) {
       rate: 1,
       onStart: () => {
         if (gen !== speakGen.current) return
+        pendingAutoRetryRef.current = false
         setPlaying(true)
       },
       onEnd: () => {
@@ -199,10 +206,15 @@ export function BriefMe({ open, onClose }: Props) {
         playlistRef.current = false
         userArmedPlayRef.current = false
         setPlaying(false)
+        const blocked = error.error === 'not-allowed'
+        if (blocked && autoPlay) {
+          // First paint / cold open has no gesture — retry on the next tap.
+          pendingAutoRetryRef.current = true
+        }
         setTtsError(
-          error.error === 'not-allowed'
+          blocked
             ? autoPlay
-              ? '浏览器拦截了自动播报，请点击播放按钮开始。'
+              ? '浏览器拦截了自动播报，点任意处或播放按钮即可开始。'
               : '浏览器没有启动语音播报，请检查语音权限或使用 Chrome/Edge 重试。'
             : error.error === 'language-unavailable' ||
                 error.error === 'voice-unavailable' ||
@@ -241,16 +253,26 @@ export function BriefMe({ open, onClose }: Props) {
       return
     }
     // Open → land on first card and autoplay through the playlist.
+    // Parent must call unlockSpeech() in the same tap; we speak ASAP (no long
+    // delay) so mobile browsers still treat the session as unlocked.
     pageRef.current = 0
     setPage(0)
     setElapsed(0)
     setDragX(0)
     setTtsError('')
-    const t = window.setTimeout(() => {
+    // Microtask keeps unlock utterance from being cancelled in the same tick
+    // as speakText's cancel(), while staying close to the user gesture.
+    let cancelled = false
+    const start = () => {
+      if (cancelled) return
       speakPage(0, { fromUserGesture: true, playlist: true, autoPlay: true })
-    }, 80)
-    return () => window.clearTimeout(t)
-  }, [open, speakPage, stopSpeak])
+    }
+    const t = window.setTimeout(start, 0)
+    return () => {
+      cancelled = true
+      window.clearTimeout(t)
+    }
+  }, [open, playRequestId, speakPage, stopSpeak])
   /* eslint-enable react-hooks/set-state-in-effect */
 
   function refresh() {
@@ -355,6 +377,16 @@ export function BriefMe({ open, onClose }: Props) {
         role="dialog"
         aria-modal="true"
         aria-label="Insights 今日播报"
+        onPointerDownCapture={(e) => {
+          // Cold-open autoplay is often blocked; first tap unlocks and retries.
+          if (!pendingAutoRetryRef.current || playing) return
+          const target = e.target as HTMLElement | null
+          // Let dedicated controls (play / refresh / close / dots) handle themselves.
+          if (target?.closest('button, a, [role="tab"]')) return
+          pendingAutoRetryRef.current = false
+          unlockSpeech()
+          speakPage(pageRef.current, { fromUserGesture: true, playlist: true, autoPlay: true })
+        }}
       >
         <header
           className="insights-sheet__grab"
@@ -387,14 +419,16 @@ export function BriefMe({ open, onClose }: Props) {
           </div>
 
           <div className="insights-sheet__controls">
-            <button type="button" className="sheet-icon-btn" aria-label="重新播报" onClick={refresh}>
+            <IconButton variant="soft" size="sm" aria-label="重新播报" onClick={refresh}>
               <IconRefresh />
-            </button>
-            <button
-              type="button"
-              className={`sheet-icon-btn sheet-icon-btn--ok${playing ? ' is-playing' : ''}`}
+            </IconButton>
+            <IconButton
+              variant="success"
+              size="sm"
+              className={playing ? 'is-playing' : ''}
               aria-label={playing ? '停止播报' : '播放今日播报'}
               title={playing ? '停止播报' : '点击播放今日播报'}
+              aria-pressed={playing}
               onClick={() => {
                 if (playing) {
                   stopSpeak()
@@ -407,10 +441,10 @@ export function BriefMe({ open, onClose }: Props) {
               }}
             >
               {playing ? <IconStop /> : <IconPlay />}
-            </button>
-            <button
-              type="button"
-              className="sheet-icon-btn"
+            </IconButton>
+            <IconButton
+              variant="soft"
+              size="sm"
               aria-label="关闭"
               onClick={() => {
                 stopSpeak()
@@ -418,7 +452,7 @@ export function BriefMe({ open, onClose }: Props) {
               }}
             >
               <IconClose />
-            </button>
+            </IconButton>
           </div>
         </div>
 

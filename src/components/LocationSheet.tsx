@@ -1,35 +1,51 @@
 import './LocationSheet.css'
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { IconBuilding, IconClose } from './DashIcons'
+import { IconButton } from './IconButton'
 import {
-  IconBuilding,
-  IconCalendar,
-  IconChevronRight,
-  IconClose,
-  IconPhone,
-} from './DashIcons'
+  ActionsProcurementPanel,
+  OpportunityProgressPanel,
+  VisitSummaryPanel,
+  type ActionTimelineItem,
+  type OpportunityProgressItem,
+  type VisitSummaryItem,
+} from './LocationPanels'
 import { SheetScrim } from './SheetScrim'
-import { EVENT_META, type AgendaItem, type CalEventType } from '../data/agenda'
+import { type AgendaItem, type CalEventType } from '../data/agenda'
+import { STAGE_LABEL, formatMoney } from '../data/pipeline'
+import { listDrafts } from '../data/dataverse'
 
-export type LocationVisit = {
-  id: string
-  title: string
-  type: CalEventType
-  dateLabel: string
-  status: string
-  summary: string
-}
+export type LocationVisit = VisitSummaryItem
 
 type Props = {
   open: boolean
   item: AgendaItem
-  relatedVisits?: LocationVisit[]
+  relatedVisits?: VisitSummaryItem[]
+  opportunities?: OpportunityProgressItem[]
+  actions?: ActionTimelineItem[]
   onClose: () => void
 }
 
-const PLACE_PAGES = ['Visit Summary', 'Account Pulse', 'Next Actions'] as const
+const PLACE_PAGES = ['Visit Summary', 'Opportunity Progress', 'Actions & Procurement'] as const
 
-function defaultRelatedVisits(item: AgendaItem): LocationVisit[] {
+const STAGE_PROGRESS: Record<string, number> = {
+  Identify: 20,
+  Qualify: 40,
+  Propose: 50,
+  Negotiate: 75,
+  Closed: 100,
+}
+
+const STAGE_EN: Record<string, string> = {
+  Identify: 'identify',
+  Qualify: 'qualification',
+  Propose: 'proposal',
+  Negotiate: 'negotiation',
+  Closed: 'closed',
+}
+
+function defaultRelatedVisits(item: AgendaItem): VisitSummaryItem[] {
   return [
     {
       id: `${item.id}-call`,
@@ -45,14 +61,167 @@ function defaultRelatedVisits(item: AgendaItem): LocationVisit[] {
       type: item.type,
       dateLabel: 'May 28',
       status: item.status.toLowerCase(),
-      summary: item.notes,
+      summary: item.notes.startsWith('结果:') ? item.notes : `结果: ${item.notes}`,
     },
   ]
 }
 
-export function LocationSheet({ open, item, relatedVisits, onClose }: Props) {
+function compactAmount(amount: number, currency: string) {
+  if (amount >= 1_000_000) {
+    return `${currency === 'USD' ? '$' : ''}${(amount / 1_000_000).toFixed(1)}M`
+  }
+  if (amount >= 1000) {
+    const k = amount / 1000
+    const label = Number.isInteger(k) ? `${k.toFixed(0)}K` : `${k.toFixed(0)}K`
+    return currency === 'USD' ? `$${label}` : formatMoney(amount, currency)
+  }
+  return formatMoney(amount, currency)
+}
+
+function formatCloseLabel(iso: string) {
+  if (!iso) return 'Close: —'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return `Close: ${iso}`
+  return `Close: ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+}
+
+function progressForStage(stage: string) {
+  return STAGE_PROGRESS[stage] ?? 35
+}
+
+function demoOpportunitiesFor(item: AgendaItem): OpportunityProgressItem[] {
+  const key = item.orgName
+  if (/仁济|Renji/i.test(key)) {
+    return [
+      {
+        id: `${item.id}-opp-n17`,
+        name: '监护仪 N17 批量采购',
+        progressPct: 20,
+        amountLabel: '$144K',
+        stageLabel: 'identify',
+        closeLabel: 'Close: Sep 30',
+        lastAction: '近访确认设备科兴趣；待核对采购窗口与标书细节。',
+      },
+      {
+        id: `${item.id}-opp-service`,
+        name: '原厂维保续约',
+        progressPct: 40,
+        amountLabel: '$62K',
+        stageLabel: 'qualification',
+        closeLabel: 'Close: Dec 15',
+        lastAction: '服务合同到期提醒已发出，等待采购反馈。',
+      },
+    ]
+  }
+  if (/Alpha/i.test(key)) {
+    return [
+      {
+        id: `${item.id}-opp-a1`,
+        name: 'A1 监护仪 ×8',
+        progressPct: 20,
+        amountLabel: '$96K',
+        stageLabel: 'identify',
+        closeLabel: 'Close: Sep 30',
+        lastAction: 'ICU 升级评估可能在 6 月启动；关注 A3 演示反馈。',
+      },
+    ]
+  }
+  return [
+    {
+      id: `${item.id}-opp-cloud`,
+      name: 'Cloud Migration for Research Data Infrastructure',
+      progressPct: 50,
+      amountLabel: '$780K',
+      stageLabel: 'proposal',
+      closeLabel: 'Close: Jan 31',
+      lastAction: `${key} needs to migrate genomics data to a secure cloud; vendor evaluation underway, budget approval pending.`,
+    },
+    {
+      id: `${item.id}-opp-flow`,
+      name: 'Patient Flow and Bed Management Intelligence',
+      progressPct: 50,
+      amountLabel: '$550K',
+      stageLabel: 'qualification',
+      closeLabel: 'Close: Oct 31',
+      lastAction: `${key} wants a real-time patient flow system; Clinical Lead and Procurement are reviewing scope.`,
+    },
+  ]
+}
+
+function opportunitiesForAccount(item: AgendaItem): OpportunityProgressItem[] {
+  const drafts = listDrafts().filter((d) => d.kind === 'opportunity')
+  const fromDrafts: OpportunityProgressItem[] = drafts
+    .filter((d) => {
+      const name = 'accountName' in d ? d.accountName : ''
+      return name && (name.includes(item.orgName) || item.orgName.includes(name))
+    })
+    .map((d) => {
+      const opp = d as Extract<(typeof drafts)[number], { kind: 'opportunity' }>
+      return {
+        id: opp.idempotencyKey,
+        name: opp.name || '未命名商机草稿',
+        progressPct: progressForStage(opp.stage || 'Identify'),
+        amountLabel: compactAmount(opp.estimatedValue || 0, opp.currency || 'USD'),
+        stageLabel: STAGE_EN[opp.stage] || STAGE_LABEL[opp.stage] || (opp.stage || 'identify').toLowerCase(),
+        closeLabel: formatCloseLabel(opp.closeDate || ''),
+        lastAction: '本地草稿待确认后同步 CRM。',
+      }
+    })
+
+  if (fromDrafts.length) return fromDrafts
+
+  // Demo org / unmatched accounts still show representative progress cards.
+  return demoOpportunitiesFor(item)
+}
+
+function defaultActions(item: AgendaItem, visits: VisitSummaryItem[]): ActionTimelineItem[] {
+  const fromVisits = visits.slice(0, 3).map((visit, index) => ({
+    id: `act-${visit.id}`,
+    text: visit.summary.replace(/^结果[:：]\s*/, ''),
+    dateLabel: visit.dateLabel,
+    done: index > 0,
+  }))
+  if (fromVisits.length >= 2) return fromVisits
+  return [
+    {
+      id: `${item.id}-a1`,
+      text: 'Confirmed details about the mobile nursing system upgrade',
+      dateLabel: 'May 28',
+      done: false,
+    },
+    {
+      id: `${item.id}-a2`,
+      text: 'Held a Teams meeting to demo the remote consultation platform and answered questions',
+      dateLabel: 'May 28',
+      done: true,
+    },
+    {
+      id: `${item.id}-a3`,
+      text: `Aligned next steps with ${item.contacts[0]?.name || 'key contact'} on procurement timing`,
+      dateLabel: 'May 17',
+      done: true,
+    },
+  ]
+}
+
+export function LocationSheet({
+  open,
+  item,
+  relatedVisits,
+  opportunities,
+  actions,
+  onClose,
+}: Props) {
   const [page, setPage] = useState(0)
   const visits = useMemo(() => relatedVisits ?? defaultRelatedVisits(item), [item, relatedVisits])
+  const oppItems = useMemo(
+    () => opportunities ?? opportunitiesForAccount(item),
+    [item, opportunities],
+  )
+  const actionItems = useMemo(
+    () => actions ?? defaultActions(item, visits),
+    [actions, item, visits],
+  )
 
   useEffect(() => {
     if (open) setPage(0)
@@ -60,7 +229,6 @@ export function LocationSheet({ open, item, relatedVisits, onClose }: Props) {
 
   if (!open) return null
 
-  const pageTitle = PLACE_PAGES[page] ?? PLACE_PAGES[0]
   const host = typeof document !== 'undefined' ? document.querySelector('.app-shell') : null
 
   const sheet = (
@@ -75,9 +243,16 @@ export function LocationSheet({ open, item, relatedVisits, onClose }: Props) {
             <h2>{item.orgName}</h2>
             <p>{item.orgIndustry}</p>
           </div>
-          <button type="button" className="location-sheet__close" aria-label="关闭" onClick={onClose}>
+          <IconButton
+            className="location-sheet__close"
+            variant="soft"
+            size="sm"
+            squared
+            aria-label="关闭"
+            onClick={onClose}
+          >
             <IconClose />
-          </button>
+          </IconButton>
         </header>
 
         <div className="location-sheet__pager">
@@ -97,6 +272,7 @@ export function LocationSheet({ open, item, relatedVisits, onClose }: Props) {
                   key={label}
                   type="button"
                   role="tab"
+                  aria-label={label}
                   aria-selected={i === page}
                   className={i === page ? 'location-sheet__dot is-active' : 'location-sheet__dot'}
                   onClick={() => setPage(i)}
@@ -116,67 +292,9 @@ export function LocationSheet({ open, item, relatedVisits, onClose }: Props) {
         </div>
 
         <div className="location-sheet__body">
-          <h3>{pageTitle}</h3>
-
-          {page === 0 ? (
-            <ul className="location-visit-list">
-              {visits.map((visit) => (
-                <li key={visit.id} className="location-visit-card">
-                  <div className="location-visit-card__top">
-                    <span
-                      className={`location-visit-card__icon ${EVENT_META[visit.type].className}`}
-                      aria-hidden
-                    >
-                      {visit.type === 'call' ? <IconPhone /> : <IconCalendar />}
-                    </span>
-                    <div className="location-visit-card__copy">
-                      <div className="location-visit-card__title-row">
-                        <strong>{visit.title}</strong>
-                        <span className="activity-tag is-draft">{visit.status}</span>
-                      </div>
-                      <p>
-                        {visit.dateLabel} · {EVENT_META[visit.type].label.toLowerCase()}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="location-visit-card__summary">{visit.summary}</div>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-
-          {page === 1 ? (
-            <div className="location-sheet__panel">
-              <p className="location-sheet__panel-meta">
-                <IconBuilding /> {item.orgName}
-              </p>
-              <p className="location-sheet__panel-meta">
-                <IconPhone /> {item.orgPhone}
-              </p>
-              <p className="muted">
-                近 30 天拜访活跃，信用评级稳定。建议在下次会面前核对采购窗口与现有商机阶段。
-              </p>
-            </div>
-          ) : null}
-
-          {page === 2 ? (
-            <div className="location-sheet__panel">
-              <ul className="location-sheet__actions">
-                <li>
-                  <IconChevronRight />
-                  跟进 Remote Consultation 演示反馈
-                </li>
-                <li>
-                  <IconChevronRight />
-                  确认 Mobile Nursing 升级时间表
-                </li>
-                <li>
-                  <IconChevronRight />
-                  整理联系人并同步 CRM 草稿
-                </li>
-              </ul>
-            </div>
-          ) : null}
+          {page === 0 ? <VisitSummaryPanel items={visits} /> : null}
+          {page === 1 ? <OpportunityProgressPanel items={oppItems} /> : null}
+          {page === 2 ? <ActionsProcurementPanel actions={actionItems} /> : null}
         </div>
       </section>
     </div>
@@ -184,3 +302,6 @@ export function LocationSheet({ open, item, relatedVisits, onClose }: Props) {
 
   return host ? createPortal(sheet, host) : sheet
 }
+
+/** @deprecated Prefer VisitSummaryItem from LocationPanels */
+export type { CalEventType }

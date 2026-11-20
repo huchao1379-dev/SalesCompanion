@@ -17,6 +17,14 @@ export const config = {
   deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() || '',
   deepseekBaseUrl: (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, ''),
   deepseekModel: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+  /** Optional OpenAI-compatible vision model for image attachments. */
+  visionApiKey: process.env.VISION_API_KEY?.trim() || process.env.DEEPSEEK_API_KEY?.trim() || '',
+  visionBaseUrl: (
+    process.env.VISION_BASE_URL ||
+    process.env.DEEPSEEK_BASE_URL ||
+    'https://api.deepseek.com'
+  ).replace(/\/$/, ''),
+  visionModel: process.env.VISION_MODEL?.trim() || '',
   copilotStudioDirectConnectUrl: process.env.COPILOTSTUDIO_DIRECT_CONNECT_URL?.trim() || '',
   copilotStudioAccessToken: process.env.COPILOTSTUDIO_ACCESS_TOKEN?.trim() || '',
   copilotStudioTenantId: process.env.COPILOTSTUDIO_TENANT_ID?.trim() || '',
@@ -32,6 +40,11 @@ export const config = {
 
 export function hasDeepSeek(): boolean {
   return config.aiProvider === 'deepseek' && Boolean(config.deepseekApiKey)
+}
+
+/** Vision needs an explicit VISION_MODEL (deepseek-chat is text-only). */
+export function hasVisionModel(): boolean {
+  return Boolean(config.visionApiKey && config.visionModel)
 }
 
 export function hasCopilotStudioConfig(): boolean {

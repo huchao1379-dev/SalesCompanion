@@ -189,12 +189,21 @@ export type AgentMessage = {
   steps?: AgentStep[]
 }
 
+/** Client-supplied file for this turn (base64, no data-URL prefix). */
+export type OrchestratorAttachment = {
+  name: string
+  mimeType: string
+  dataBase64: string
+}
+
 export type OrchestratorRequest = {
   utterance: string
   locale?: string
   context?: Record<string, string>
   /** Stable per user turn; retries reuse it so drafts stay idempotent. */
   turnId?: string
+  /** Optional images / text files for this turn. */
+  attachments?: OrchestratorAttachment[]
 }
 
 export type OrchestratorResponse = {

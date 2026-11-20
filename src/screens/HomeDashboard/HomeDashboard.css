@@ -79,60 +79,7 @@
   margin-right: var(--space-4);
 }
 
-.icon-btn {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: 1px solid var(--line-strong);
-  background: color-mix(in srgb, var(--surface-solid) 78%, transparent);
-  backdrop-filter: var(--blur);
-  color: var(--text-secondary);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  position: relative;
-  transition: background 0.15s ease, transform 0.1s ease, color 0.15s ease;
-}
-
-.icon-btn:hover {
-  background: var(--surface-solid);
-  color: var(--text);
-}
-
-.icon-btn:active {
-  transform: scale(0.96);
-}
-
-.icon-btn__dot {
-  position: absolute;
-  top: 8px;
-  right: 9px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--danger);
-  border: 1.5px solid var(--surface-solid);
-}
-
-.icon-btn__count {
-  position: absolute;
-  top: 2px;
-  right: 0;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 999px;
-  background: var(--danger);
-  color: #fff;
-  border: 1.5px solid var(--surface-solid);
-  font-size: 0.62rem;
-  font-weight: 750;
-  line-height: 13px;
-  text-align: center;
-  letter-spacing: -0.02em;
-  box-sizing: border-box;
-}
+/* .icon-btn / badge styles live in styles/shared-ui.css */
 
 /* ── Metric cards ──────────────────────────────────── */
 
@@ -434,6 +381,10 @@
   background: var(--cal-email);
 }
 
+.cal-dot.is-insight-task {
+  background: #0d9488;
+}
+
 .cal-legend {
   list-style: none;
   margin: var(--space-4) 0 0;
@@ -624,6 +575,46 @@
   width: 22px;
   height: 22px;
 }
+
+.cal-agenda__icon.is-insight-task {
+  background: color-mix(in srgb, #14b8a6 16%, transparent);
+  color: #0f766e;
+}
+
+.cal-agenda__item--task .cal-agenda__meta {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cal-agenda__item--task.is-done {
+  opacity: 0.72;
+}
+
+.cal-agenda__item--task.is-done .cal-agenda__title {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.cal-agenda__task-state {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #0f766e;
+  background: color-mix(in srgb, #14b8a6 12%, transparent);
+  border: 1px solid color-mix(in srgb, #14b8a6 22%, transparent);
+  border-radius: 8px;
+  padding: 0.2rem 0.45rem;
+}
+
+.cal-agenda__item--task.is-done .cal-agenda__task-state {
+  color: var(--muted);
+  background: var(--surface-muted);
+  border-color: var(--line);
+}
+
 @media (max-width: 380px) {
   .metric-rail {
     gap: 0.45rem;
@@ -644,6 +635,25 @@
 
   .dash__time {
     font-size: 1.7rem;
+  }
+
+  .dash__actions {
+    gap: 0.25rem;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 480px) {
+  .dash__top {
+    padding-top: var(--space-2);
+    padding-bottom: var(--space-2);
+  }
+
+  .dash__time {
+    font-size: 1.45rem;
+  }
+
+  .metric-rail {
+    margin-bottom: var(--space-2);
   }
 }
 

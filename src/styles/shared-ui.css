@@ -43,17 +43,28 @@
 .btn {
   border: 1px solid transparent;
   border-radius: 999px;
+  min-height: var(--touch-min);
   padding: 0.62rem 1.05rem;
   cursor: pointer;
   color: var(--text);
   background: var(--surface-solid);
   border-color: var(--line);
   font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
 }
 
 .btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .btn--primary {
@@ -73,8 +84,15 @@
   background: transparent;
 }
 
+.btn--danger {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.22);
+  color: #b91c1c;
+}
+
 .metric-chip,
-.chip-btn {
+.chip-btn,
+.ui-pill {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
@@ -88,10 +106,283 @@
 .chip-btn {
   cursor: pointer;
   text-align: left;
+  min-height: 36px;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.chip-btn.is-active {
+.chip-btn.is-active,
+.ui-pill.is-active {
   border-color: var(--green);
   color: var(--green-deep);
   background: var(--green-soft);
+}
+
+/* ── Icon button (IconButton + legacy .icon-btn alias) ─ */
+
+.ui-icon-btn,
+.icon-btn {
+  width: var(--control-size);
+  height: var(--control-size);
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--surface-solid) 86%, transparent);
+  backdrop-filter: var(--blur);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+  padding: 0;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.1s ease,
+    box-shadow 0.15s ease;
+}
+
+.ui-icon-btn--sm {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+}
+
+.ui-icon-btn--md,
+.icon-btn {
+  width: var(--control-size);
+  height: var(--control-size);
+}
+
+.ui-icon-btn--lg {
+  width: var(--control-size-lg);
+  height: var(--control-size-lg);
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+}
+
+.ui-icon-btn.is-squared,
+.ui-icon-btn--squared {
+  border-radius: var(--radius-sm);
+}
+
+.ui-icon-btn:hover,
+.icon-btn:hover {
+  background: var(--surface-solid);
+  color: var(--text);
+}
+
+.ui-icon-btn:active,
+.icon-btn:active {
+  transform: scale(0.96);
+}
+
+.ui-icon-btn:disabled,
+.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.ui-icon-btn--soft {
+  background: var(--surface-muted);
+  border-color: var(--line);
+}
+
+.ui-icon-btn--accent {
+  background: var(--green-soft);
+  border-color: color-mix(in srgb, var(--green) 35%, var(--line));
+  color: var(--green-deep);
+}
+
+.ui-icon-btn--success {
+  background: var(--green);
+  border-color: transparent;
+  color: #fff;
+}
+
+.ui-icon-btn--success.is-playing,
+.ui-icon-btn--success[aria-pressed='true'] {
+  background: var(--green-deep);
+}
+
+.ui-icon-btn--danger {
+  color: var(--danger);
+  border-color: rgba(239, 68, 68, 0.22);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.ui-icon-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.ui-icon-btn__dot,
+.icon-btn__dot {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--danger);
+  border: 1.5px solid var(--surface-solid);
+}
+
+.ui-icon-btn__count,
+.icon-btn__count {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  border: 1.5px solid var(--surface-solid);
+  font-size: 0.62rem;
+  font-weight: 750;
+  line-height: 13px;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+/* Legacy sheet / activity icon controls share touch geometry */
+.sheet-icon-btn,
+.activity-detail__icon-btn {
+  width: var(--control-size);
+  height: var(--control-size);
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--surface-solid) 88%, transparent);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.sheet-icon-btn {
+  width: 40px;
+  height: 40px;
+  background: var(--surface-muted);
+  border-color: var(--line);
+}
+
+.sheet-icon-btn--ok {
+  background: var(--green);
+  border-color: transparent;
+  color: #fff;
+}
+
+.sheet-icon-btn--ok.is-playing {
+  background: var(--green-deep);
+}
+
+.activity-detail__icon-btn.is-danger {
+  color: var(--danger);
+  border-color: rgba(239, 68, 68, 0.22);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+/* ── Empty state ───────────────────────────────────── */
+
+.ui-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-4);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface-solid) 88%, transparent);
+  border: 1px solid var(--line);
+}
+
+.ui-empty.is-compact {
+  padding: var(--space-4);
+  align-items: flex-start;
+  text-align: left;
+}
+
+.ui-empty__icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--green-soft);
+  color: var(--green-deep);
+}
+
+.ui-empty__title {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 750;
+  color: var(--text);
+}
+
+.ui-empty__desc {
+  margin: 0;
+  max-width: 28rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.ui-empty__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: center;
+  margin-top: var(--space-1);
+}
+
+.ui-empty.is-compact .ui-empty__actions {
+  justify-content: flex-start;
+}
+
+/* ── Responsive helpers ────────────────────────────── */
+
+@media (max-width: 380px) {
+  :root {
+    --space-4: 0.85rem;
+    --space-5: 1.05rem;
+    --control-size: 40px;
+  }
+
+  .btn {
+    padding: 0.55rem 0.9rem;
+    font-size: 0.92rem;
+  }
+
+  .ui-empty {
+    padding: var(--space-5) var(--space-3);
+  }
+}
+
+@media (orientation: landscape) and (max-height: 480px) {
+  :root {
+    --tab-h: 96px;
+  }
+
+  .ui-empty {
+    padding: var(--space-3);
+  }
 }

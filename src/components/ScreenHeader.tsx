@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { IconBack } from './DashIcons'
+import { IconButton } from './IconButton'
 import './ScreenHeader.css'
 
 type Props = {
@@ -20,12 +21,18 @@ export function ScreenHeader({
   trailing,
   className,
 }: Props) {
+  const flush = Boolean(className?.includes('screen-header--flush'))
   return (
     <header className={['screen-header', className].filter(Boolean).join(' ')}>
       {onBack ? (
-        <button type="button" className="screen-header__btn" aria-label={backLabel} onClick={onBack}>
+        <IconButton
+          className="screen-header__btn"
+          squared={flush}
+          aria-label={backLabel}
+          onClick={onBack}
+        >
           <IconBack />
-        </button>
+        </IconButton>
       ) : (
         <span className="screen-header__btn is-ghost" aria-hidden />
       )}

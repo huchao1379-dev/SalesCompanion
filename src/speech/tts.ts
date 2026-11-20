@@ -16,12 +16,27 @@ function normalizeLang(lang: string) {
   return lang.replace('_', '-').toLowerCase()
 }
 
-/** Resume a paused speech engine; the actual utterance is started by the UI. */
+/**
+ * Prime speechSynthesis inside a user gesture so later (async) speak() calls
+ * work on mobile Chrome / Safari. resume() alone is not enough — browsers need
+ * a real speak() during the activation window.
+ */
 export function unlockSpeech() {
   const s = synth()
   if (!s) return
   void ensureVoices()
   try {
+    s.resume()
+  } catch {
+    // ignore
+  }
+  try {
+    // Zero-width space: counts as a speak for autoplay policy, stays inaudible.
+    const unlock = new SpeechSynthesisUtterance('\u200B')
+    unlock.volume = 0
+    unlock.rate = 2
+    unlock.lang = 'zh-CN'
+    s.speak(unlock)
     s.resume()
   } catch {
     // ignore
@@ -97,7 +112,8 @@ export function speakText(text: string, options: SpeakOptions = {}): () => void 
   const voice = pickVoice(voices, lang)
 
   try {
-    s.cancel()
+    // Clear any prior utterance (including the silent unlock) before speaking.
+    if (s.speaking || s.pending) s.cancel()
   } catch {
     // ignore
   }
@@ -107,6 +123,8 @@ export function speakText(text: string, options: SpeakOptions = {}): () => void 
     utter = new SpeechSynthesisUtterance(trimmed)
     utter.lang = voice?.lang || lang
     utter.rate = options.rate ?? 1
+    // Full volume — mobile hosts sometimes inherit 0 from a prior unlock utter.
+    utter.volume = 1
     if (voice) utter.voice = voice
   } catch {
     options.onError?.({ error: 'synthesis-failed' } as SpeechSynthesisErrorEvent)
@@ -163,11 +181,16 @@ export function speakText(text: string, options: SpeakOptions = {}): () => void 
   }
 
   // Android Chrome frequently queues in a paused state until resume().
-  try {
-    s.resume()
-  } catch {
-    // ignore
+  const kickResume = () => {
+    try {
+      s.resume()
+    } catch {
+      // ignore
+    }
   }
+  kickResume()
+  // Second kick after layout — helps some WebView / iOS hosts.
+  window.setTimeout(kickResume, 60)
 
   // Some embedded browsers never dispatch `onstart` for blocked/unsupported
   // speech. Do not leave the UI silently idle or permanently pending.

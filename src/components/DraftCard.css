@@ -2,11 +2,12 @@
 
 .draft-card {
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   background: var(--surface-solid);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: var(--space-4);
+  padding-top: calc(var(--space-4) + 0.35rem);
   padding-bottom: calc(var(--space-4) + 0.15rem);
   box-shadow: var(--shadow-soft);
   box-sizing: border-box;
@@ -16,6 +17,7 @@
   margin: 0;
   transform: none;
   inset: auto;
+  isolation: isolate;
 }
 
 .draft-card--opportunity {
@@ -28,18 +30,27 @@
 
 .draft-card__ribbon {
   position: absolute;
-  top: 0.7rem;
-  right: -1.85rem;
+  top: 0;
+  right: 0;
   z-index: 1;
-  transform: rotate(35deg);
+  transform: none;
   background: var(--green);
   color: #052e16;
   font-size: 0.66rem;
   font-weight: 800;
-  padding: 0.14rem 2.1rem;
+  padding: 0.28rem 0.65rem 0.28rem 0.7rem;
   pointer-events: none;
   line-height: 1.2;
   white-space: nowrap;
+  border-radius: 0 var(--radius) 0 10px;
+  max-width: min(46%, 11rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.draft-card--opportunity .draft-card__ribbon {
+  background: color-mix(in srgb, var(--blue-ink) 88%, white);
+  color: #eff6ff;
 }
 
 .draft-card__header,
@@ -53,8 +64,9 @@
 .draft-card__header {
   position: relative;
   z-index: 1;
-  padding-right: 3.25rem;
+  padding-right: 0;
   min-width: 0;
+  margin-top: 0.15rem;
 }
 
 .draft-card__heading {
@@ -90,8 +102,9 @@
   align-items: flex-end;
   gap: 0.25rem;
   flex-shrink: 0;
-  max-width: 42%;
+  max-width: 48%;
   text-align: right;
+  padding-top: 1.35rem;
 }
 
 .draft-card__meta .confidence {
@@ -118,12 +131,21 @@
 .draft-card__body textarea,
 .draft-card__body select {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   margin-top: var(--space-2);
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
   background: var(--surface-solid);
   color: var(--text);
   padding: 0.7rem 0.85rem;
+}
+
+.draft-card__body input[type='datetime-local'],
+.draft-card__body input[type='date'] {
+  font-size: 0.82rem;
+  padding: 0.65rem 0.55rem;
 }
 
 .draft-card__label-row {
@@ -215,8 +237,26 @@
 
 .draft-card__row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--space-3);
+  min-width: 0;
+  width: 100%;
+}
+
+.draft-card__row > label {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.draft-card__row--datetime {
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 420px) {
+  .draft-card__row--datetime {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
 }
 
 .draft-card__hint,
@@ -269,7 +309,7 @@
 
 /* Supervisor review block */
 .draft-card__review {
-  margin: 0.55rem 0.75rem 0;
+  margin: 0.55rem 0 0;
   padding: 0.55rem 0.65rem;
   border-radius: 10px;
   border: 1px solid rgba(148, 163, 184, 0.22);

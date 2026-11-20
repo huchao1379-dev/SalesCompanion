@@ -37,6 +37,7 @@ export function AppShell() {
   const [accountKey, setAccountKey] = useState<string>('SAP-ACC-RENJI')
   const [opportunityId, setOpportunityId] = useState<string | null>(null)
   const [insightsOpen, setInsightsOpen] = useState(true)
+  const [briefPlayRequestId, setBriefPlayRequestId] = useState(0)
   const [copilotDraft, setCopilotDraft] = useState('')
   const [chatSeed, setChatSeed] = useState('')
   const [chatKey, setChatKey] = useState(0)
@@ -70,14 +71,19 @@ export function AppShell() {
   }
 
   function openBrief() {
+    // Must unlock TTS inside the tap so BriefMe autoplay works on mobile.
     unlockSpeech()
     goScreen('home')
     setInsightsOpen(true)
+    setBriefPlayRequestId((n) => n + 1)
   }
 
   const onBoard = screen === 'home'
   const showDock =
-    !(onBoard && insightsOpen) && screen !== 'chat' && screen !== 'opportunity-detail'
+    !(onBoard && insightsOpen) &&
+    screen !== 'chat' &&
+    screen !== 'opportunity-detail' &&
+    screen !== 'capture'
 
   const dockMode =
     screen === 'activity' ? 'activity' : screen === 'capture' || screen === 'opportunity' ? 'compact' : 'default'
@@ -97,7 +103,7 @@ export function AppShell() {
   return (
     <div
       className={`app-shell${onBoard ? ' app-shell--board' : ''}${showDock ? ' has-dock' : ''}${
-        showDock && (screen === 'capture' || screen === 'opportunity') ? ' has-dock--compact' : ''
+        showDock && screen === 'opportunity' ? ' has-dock--compact' : ''
       }${showDock && screen === 'activity' ? ' has-dock--activity' : ''}${
         screen === 'opportunity-detail' ? ' has-opp-detail' : ''
       }`}
@@ -147,6 +153,7 @@ export function AppShell() {
               initialDrafts={seedDrafts.filter((d) => d.kind === 'activity')}
               accountKey={accountKey}
               onBack={() => goScreen('home')}
+              onAccountChange={setAccountKey}
               onDraftsCommitted={(drafts) => {
                 setSeedDrafts(drafts)
                 const ref = drafts.find((d) => d.accountRef)?.accountRef
@@ -216,12 +223,19 @@ export function AppShell() {
               item={activityItem}
               dateLabel={activityDateLabel}
               onBack={() => goScreen('home')}
+              onAskCopilot={(prompt) => openChat(prompt)}
             />
           ) : null}
         </main>
       )}
 
-      {onBoard ? <BriefMe open={insightsOpen} onClose={() => setInsightsOpen(false)} /> : null}
+      {onBoard ? (
+        <BriefMe
+          open={insightsOpen}
+          playRequestId={briefPlayRequestId}
+          onClose={() => setInsightsOpen(false)}
+        />
+      ) : null}
 
       {showDock ? (
         <CopilotDock

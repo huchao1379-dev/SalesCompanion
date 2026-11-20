@@ -8,20 +8,26 @@ function isAppleTouchDevice() {
   )
 }
 
-/** Keep bottom docks clear of iOS Safari / host chrome. */
+function isAndroidDevice() {
+  if (typeof navigator === 'undefined') return false
+  return /Android/i.test(navigator.userAgent)
+}
+
+/** Keep bottom docks clear of iOS Safari / Android Chrome / host chrome. */
 export function useBrowserBottomInset() {
   useEffect(() => {
     const root = document.documentElement
     const ios = isAppleTouchDevice()
+    const android = isAndroidDevice()
 
     const sync = () => {
       const vv = window.visualViewport
       const measured = vv
         ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
         : 0
-      // iOS Safari bottom URL/toolbar often sits over the page; iframe hosts
-      // may also report 0 for env(safe-area-inset-bottom). Keep a floor gap.
-      const floor = ios ? 20 : 0
+      // Mobile browser chrome often sits over the page; iframe hosts may also
+      // report 0 for env(safe-area-inset-bottom). Keep a platform floor gap.
+      const floor = ios ? 20 : android ? 12 : 0
       root.style.setProperty('--browser-bottom', `${Math.max(measured, floor)}px`)
     }
 

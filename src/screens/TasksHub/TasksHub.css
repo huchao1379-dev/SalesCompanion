@@ -37,6 +37,41 @@
 .task-row__title {
   font-weight: 600;
   margin-bottom: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+.task-row--insight {
+  border-color: color-mix(in srgb, #14b8a6 22%, var(--line));
+}
+
+.task-row--insight.is-done {
+  opacity: 0.72;
+}
+
+.task-row--insight.is-done .task-row__title {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.task-row__state {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #0f766e;
+  background: color-mix(in srgb, #14b8a6 12%, transparent);
+  border: 1px solid color-mix(in srgb, #14b8a6 22%, transparent);
+  border-radius: 8px;
+  padding: 0.25rem 0.5rem;
+}
+
+.task-row--insight.is-done .task-row__state {
+  color: var(--muted);
+  background: var(--surface-muted);
+  border-color: var(--line);
+}
+
+:root[data-theme='dark'] .task-row__state {
+  color: #5eead4;
 }
 
 .tasks__logs ul {

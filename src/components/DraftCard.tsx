@@ -245,7 +245,7 @@ export function DraftCard({
               onChange={(e) => onChange({ ...draft, summary: e.target.value })}
             />
           </label>
-          <div className="draft-card__row">
+          <div className="draft-card__row draft-card__row--datetime">
             <label>
               开始
               <input
