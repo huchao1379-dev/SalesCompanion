@@ -192,6 +192,11 @@ export async function fetchActivityInsight(
   opts?: { recentVisits?: ReturnType<typeof relatedVisitsForActivity>; refreshNonce?: string },
 ): Promise<ActivityInsightView> {
   try {
+    // Older deployed APIs do not expose this route. Check the advertised contract first so
+    // version skew degrades locally without producing a guaranteed POST 404 in the console.
+    if (!(await api.supportsActivityInsight())) {
+      return localHeuristicInsight(item, opts?.recentVisits)
+    }
     const result = await api.activityInsight({
       activity: {
         id: item.id,

@@ -37,6 +37,9 @@ apiRouter.get('/health', async (_req, res) => {
     promptVersion: config.promptVersion,
     accounts: (await repository.listAccounts()).length,
     agents: getCatalogSummary().length,
+    capabilities: {
+      activityInsight: true,
+    },
   })
 })
 

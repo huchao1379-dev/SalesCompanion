@@ -1,6 +1,26 @@
 import type { DraftPayload } from '../agents/types'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') || '/api'
+const CAPABILITY_CACHE_MS = 60_000
+
+type ApiHealth = {
+  ok: boolean
+  deepseek: boolean
+  vision?: boolean
+  visionModel?: string
+  aiProvider?: 'deepseek' | 'copilotstudio'
+  copilotstudio?: boolean
+  dataverseMode: string
+  promptVersion: string
+  capabilities?: {
+    activityInsight?: boolean
+  }
+}
+
+let activityInsightCapability:
+  | { supported: boolean; expiresAt: number }
+  | undefined
+let activityInsightCapabilityRequest: Promise<boolean> | undefined
 
 function isPowerPlatformHost() {
   if (typeof window === 'undefined') return false
@@ -74,18 +94,33 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
+async function supportsActivityInsight(): Promise<boolean> {
+  const now = Date.now()
+  if (activityInsightCapability && activityInsightCapability.expiresAt > now) {
+    return activityInsightCapability.supported
+  }
+  if (activityInsightCapabilityRequest) return activityInsightCapabilityRequest
+
+  activityInsightCapabilityRequest = request<ApiHealth>('/health')
+    .then((health) => health.capabilities?.activityInsight === true)
+    .catch(() => false)
+    .then((supported) => {
+      activityInsightCapability = {
+        supported,
+        expiresAt: Date.now() + CAPABILITY_CACHE_MS,
+      }
+      return supported
+    })
+    .finally(() => {
+      activityInsightCapabilityRequest = undefined
+    })
+
+  return activityInsightCapabilityRequest
+}
+
 export const api = {
-  health: () =>
-    request<{
-      ok: boolean
-      deepseek: boolean
-      vision?: boolean
-      visionModel?: string
-      aiProvider?: 'deepseek' | 'copilotstudio'
-      copilotstudio?: boolean
-      dataverseMode: string
-      promptVersion: string
-    }>('/health'),
+  health: () => request<ApiHealth>('/health'),
+  supportsActivityInsight,
   orchestrate: (
     body: {
       utterance: string
