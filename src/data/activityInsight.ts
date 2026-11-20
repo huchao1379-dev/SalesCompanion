@@ -117,7 +117,51 @@ function typeZh(type: string) {
   return '活动'
 }
 
-function normalizeInsight(raw: Partial<ActivityInsightView> & { summary?: string }): ActivityInsightView {
+type InsightActionInput = {
+  id?: string
+  title?: string
+  description?: string
+  priority?: InsightActionPriority
+  ownerName?: string | null
+  contactName?: string | null
+  dueAt?: string | null
+  dueLabel?: string | null
+  source?: string
+  actionType?: InsightActionType
+}
+
+type InsightPayloadInput = {
+  summary?: string
+  signals?: InsightSignal[]
+  pendingChecks?: InsightPendingCheck[]
+  actions?: InsightActionInput[]
+  evidence?: Partial<InsightEvidence> | null
+  updatedAt?: string
+  mode?: ActivityInsightView['mode']
+  agentName?: string
+  opportunityCount?: number
+  visitCount?: number
+}
+
+function normalizeActions(actions: InsightActionInput[] | undefined): InsightAction[] {
+  if (!Array.isArray(actions)) return []
+  return actions
+    .map((action, index) => ({
+      id: String(action.id || `action_${index + 1}`),
+      title: String(action.title || '').trim(),
+      description: String(action.description || '').trim(),
+      priority: action.priority || 'this_week',
+      ownerName: action.ownerName ?? null,
+      contactName: action.contactName ?? null,
+      dueAt: action.dueAt ?? null,
+      dueLabel: action.dueLabel ?? null,
+      source: action.source || 'activity_notes',
+      actionType: action.actionType || 'follow_up',
+    }))
+    .filter((action) => action.title)
+}
+
+function normalizeInsight(raw: InsightPayloadInput): ActivityInsightView {
   const evidence = raw.evidence || {
     activityIncluded: true,
     opportunityCount: raw.opportunityCount ?? 0,
@@ -128,7 +172,7 @@ function normalizeInsight(raw: Partial<ActivityInsightView> & { summary?: string
     summary: String(raw.summary || '').trim() || '洞察结果待确认。',
     signals: Array.isArray(raw.signals) ? raw.signals : [],
     pendingChecks: Array.isArray(raw.pendingChecks) ? raw.pendingChecks : [],
-    actions: Array.isArray(raw.actions) ? raw.actions : [],
+    actions: normalizeActions(raw.actions),
     evidence: {
       activityIncluded: evidence.activityIncluded !== false,
       opportunityCount: evidence.opportunityCount ?? 0,

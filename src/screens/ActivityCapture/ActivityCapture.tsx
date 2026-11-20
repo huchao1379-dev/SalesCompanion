@@ -911,7 +911,7 @@ export function ActivityCapture({
               <button
                 type="button"
                 className="chip-btn"
-                disabled={contentLocked || !hasContent || phase === 'processing'}
+                disabled={contentLocked || !hasContent}
                 onClick={() => {
                   void generateDrafts(displayTranscript)
                 }}
