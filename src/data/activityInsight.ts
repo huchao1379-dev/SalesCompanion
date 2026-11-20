@@ -210,8 +210,11 @@ export async function fetchActivityInsight(
     })
     return normalizeInsight(result)
   } catch (err) {
-    if (err instanceof ApiRequestError && err.kind === 'network') {
-      // Offline / no server: still return usable Chinese insight locally.
+    // Offline, or production API not yet redeployed with POST /activity-insight (nginx 404).
+    if (
+      err instanceof ApiRequestError &&
+      (err.kind === 'network' || err.status === 404 || err.status === 502 || err.status === 503)
+    ) {
       return localHeuristicInsight(item, opts?.recentVisits)
     }
     throw err
