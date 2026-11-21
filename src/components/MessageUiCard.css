@@ -538,3 +538,48 @@
 .msg-ui__contacts li {
   min-width: 0;
 }
+
+.msg-ui__origin {
+  margin: -0.15rem 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.msg-ui__followups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+}
+
+.msg-ui__followup {
+  appearance: none;
+  border: 1px solid color-mix(in srgb, #14b8a6 28%, var(--line));
+  background: color-mix(in srgb, #14b8a6 10%, var(--surface-solid));
+  color: #0f766e;
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 650;
+  min-height: 32px;
+  max-width: 100%;
+  text-align: left;
+  cursor: pointer;
+  line-height: 1.35;
+}
+
+.msg-ui__followup:hover {
+  background: color-mix(in srgb, #14b8a6 18%, var(--surface-solid));
+}
+
+.msg-ui__followup:focus-visible {
+  outline: 2px solid color-mix(in srgb, #14b8a6 55%, transparent);
+  outline-offset: 2px;
+}
+
+:root[data-theme='dark'] .msg-ui__followup {
+  color: #5eead4;
+  background: rgba(20, 184, 166, 0.14);
+  border-color: rgba(20, 184, 166, 0.28);
+}

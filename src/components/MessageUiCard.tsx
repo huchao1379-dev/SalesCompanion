@@ -7,7 +7,7 @@ type Props = {
   ui: MessageUiBlock
   onOpenAccount?: (accountKey: string) => void
   onOpenOpportunity?: () => void
-  /** Clarify cards can send an example back to the composer. */
+  /** Clarify / follow-up chips can send text back to the composer. */
   onSendExample?: (text: string) => void
 }
 
@@ -85,6 +85,55 @@ function SecondaryMetrics({ metrics }: { metrics: MessageUiMetric[] }) {
   )
 }
 
+function FollowUpChips({
+  chips,
+  onSendExample,
+}: {
+  chips?: string[]
+  onSendExample?: (text: string) => void
+}) {
+  if (!chips?.length || !onSendExample) return null
+  return (
+    <div className="msg-ui__followups" aria-label="继续追问">
+      {chips.map((chip) => (
+        <button
+          key={chip}
+          type="button"
+          className="msg-ui__followup"
+          onClick={() => onSendExample(chip)}
+        >
+          {chip}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function SectionsBlock({ sections }: { sections?: MessageUiBlock['sections'] }) {
+  if (!sections?.length) return null
+  return (
+    <div className="msg-ui__sections">
+      {sections.map((section, index) => (
+        <section key={`${section.heading || 'section'}-${index}`} className="msg-ui__section">
+          {section.heading ? <p className="msg-ui__section-label">{section.heading}</p> : null}
+          <ul className="msg-ui__bullets">
+            {section.bullets.map((bullet, bulletIndex) => (
+              <li key={`${bullet.text}-${bulletIndex}`} className="msg-ui__bullet">
+                <span>{bullet.text}</span>
+                {bullet.status ? (
+                  <span className={`msg-ui__status msg-ui__status--${bullet.status.toLowerCase()}`}>
+                    {statusLabel(bullet.status)}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  )
+}
+
 export function MessageUiCard({ ui, onOpenAccount, onOpenOpportunity, onSendExample }: Props) {
   const supported =
     ui.type === 'account_pulse' ||
@@ -94,8 +143,15 @@ export function MessageUiCard({ ui, onOpenAccount, onOpenOpportunity, onSendExam
     ui.type === 'clarify' ||
     ui.type === 'work_summary' ||
     ui.type === 'capture_result' ||
-    ui.type === 'review'
+    ui.type === 'review' ||
+    ui.type === 'general_assist'
   if (!supported) return null
+
+  const followUps = ui.followUps?.length
+    ? ui.followUps
+    : ui.examples?.length
+      ? ui.examples
+      : undefined
 
   const { primary, secondary } = splitMetrics(ui.metrics)
   const opportunities = (ui.items || []).filter((i) => (i.kind || 'other') === 'opportunity')
@@ -136,40 +192,25 @@ export function MessageUiCard({ ui, onOpenAccount, onOpenOpportunity, onSendExam
     )
   }
 
-  if (ui.type === 'work_summary') {
+  if (ui.type === 'work_summary' || ui.type === 'general_assist') {
     return (
-      <div className="msg-ui msg-ui--work_summary">
+      <div className={`msg-ui msg-ui--${ui.type}`}>
         {ui.title ? <p className="msg-ui__title">{ui.title}</p> : null}
+        {ui.originLabel ? <p className="msg-ui__origin">{ui.originLabel}</p> : null}
         {primary.length || secondary.length ? (
           <>
             <MetricGrid metrics={primary} />
             <SecondaryMetrics metrics={secondary} />
           </>
         ) : null}
-        {ui.sections && ui.sections.length > 0 ? (
-          <div className="msg-ui__sections">
-            {ui.sections.map((section, index) => (
-              <section key={`${section.heading || 'section'}-${index}`} className="msg-ui__section">
-                {section.heading ? <p className="msg-ui__section-label">{section.heading}</p> : null}
-                <ul className="msg-ui__bullets">
-                  {section.bullets.map((bullet, bulletIndex) => (
-                    <li key={`${bullet.text}-${bulletIndex}`} className="msg-ui__bullet">
-                      <span>{bullet.text}</span>
-                      {bullet.status ? (
-                        <span
-                          className={`msg-ui__status msg-ui__status--${bullet.status.toLowerCase()}`}
-                        >
-                          {statusLabel(bullet.status)}
-                        </span>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ))}
-          </div>
+        <SectionsBlock sections={ui.sections} />
+        {ui.hint ? (
+          <p className="msg-ui__hint" role="note">
+            {ui.hint}
+          </p>
         ) : null}
         {ui.footnote ? <p className="msg-ui__footnote">{ui.footnote}</p> : null}
+        <FollowUpChips chips={followUps} onSendExample={onSendExample} />
       </div>
     )
   }
@@ -197,6 +238,7 @@ export function MessageUiCard({ ui, onOpenAccount, onOpenOpportunity, onSendExam
           </p>
         ) : null}
         {ui.footnote ? <p className="msg-ui__footnote">{ui.footnote}</p> : null}
+        <FollowUpChips chips={followUps} onSendExample={onSendExample} />
       </div>
     )
   }
@@ -207,6 +249,7 @@ export function MessageUiCard({ ui, onOpenAccount, onOpenOpportunity, onSendExam
         {ui.title ? <p className="msg-ui__title">{ui.title}</p> : null}
         <FindingsList findings={ui.findings || []} />
         {ui.footnote ? <p className="msg-ui__footnote">{ui.footnote}</p> : null}
+        <FollowUpChips chips={followUps} onSendExample={onSendExample} />
       </div>
     )
   }
@@ -267,6 +310,8 @@ export function MessageUiCard({ ui, onOpenAccount, onOpenOpportunity, onSendExam
         </ul>
       ) : null}
 
+      <SectionsBlock sections={ui.sections} />
+
       {ui.unverifiedNotes ? (
         <p className="msg-ui__notes">
           <strong>未核实备注</strong>
@@ -315,6 +360,7 @@ export function MessageUiCard({ ui, onOpenAccount, onOpenOpportunity, onSendExam
       ) : null}
 
       {ui.footnote ? <p className="msg-ui__footnote">{ui.footnote}</p> : null}
+      <FollowUpChips chips={followUps} onSendExample={onSendExample} />
     </div>
   )
 }

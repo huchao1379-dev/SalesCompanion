@@ -32,7 +32,18 @@ export const config = {
   copilotStudioClientSecret: process.env.COPILOTSTUDIO_CLIENT_SECRET?.trim() || '',
   dataverseUrl: process.env.DATAVERSE_URL?.trim() || '',
   dataverseToken: process.env.DATAVERSE_TOKEN?.trim() || '',
-  promptVersion: process.env.PROMPT_VERSION || 'demo-deepseek-v2',
+  /** Optional live web search for general_assist (serper | tavily). Off when key empty. */
+  webSearchProvider: (process.env.WEB_SEARCH_PROVIDER || 'serper').trim().toLowerCase(),
+  webSearchApiKey: process.env.WEB_SEARCH_API_KEY?.trim() || '',
+  webSearchBaseUrl: (process.env.WEB_SEARCH_BASE_URL || '').trim().replace(/\/$/, ''),
+  /** Allow GeneralAssist to fetch https pages; default on when search key set unless explicitly off. */
+  webFetchEnabled: (() => {
+    const raw = process.env.WEB_FETCH_ENABLED?.trim().toLowerCase()
+    if (raw === '0' || raw === 'false' || raw === 'off') return false
+    if (raw === '1' || raw === 'true' || raw === 'on') return true
+    return Boolean(process.env.WEB_SEARCH_API_KEY?.trim())
+  })(),
+  promptVersion: process.env.PROMPT_VERSION || 'demo-deepseek-v3',
   seedPath:
     process.env.SEED_PATH ||
     path.resolve(__dirname, '../../dataverse/seed/seed.json'),
@@ -60,4 +71,13 @@ export function hasCopilotStudioConfig(): boolean {
 
 export function hasRemoteDataverse(): boolean {
   return Boolean(config.dataverseUrl && config.dataverseToken)
+}
+
+/** Live web search is opt-in via WEB_SEARCH_API_KEY. */
+export function hasWebSearch(): boolean {
+  return Boolean(config.webSearchApiKey)
+}
+
+export function hasWebFetch(): boolean {
+  return config.webFetchEnabled
 }

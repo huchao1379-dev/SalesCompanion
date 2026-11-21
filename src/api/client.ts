@@ -14,6 +14,10 @@ type ApiHealth = {
   promptVersion: string
   capabilities?: {
     activityInsight?: boolean
+    opportunityInsight?: boolean
+    generalAssist?: boolean
+    webSearch?: boolean
+    webFetch?: boolean
   }
 }
 
@@ -21,6 +25,11 @@ let activityInsightCapability:
   | { supported: boolean; expiresAt: number }
   | undefined
 let activityInsightCapabilityRequest: Promise<boolean> | undefined
+
+let opportunityInsightCapability:
+  | { supported: boolean; expiresAt: number }
+  | undefined
+let opportunityInsightCapabilityRequest: Promise<boolean> | undefined
 
 function isPowerPlatformHost() {
   if (typeof window === 'undefined') return false
@@ -118,9 +127,66 @@ async function supportsActivityInsight(): Promise<boolean> {
   return activityInsightCapabilityRequest
 }
 
+async function supportsOpportunityInsight(): Promise<boolean> {
+  const now = Date.now()
+  if (opportunityInsightCapability && opportunityInsightCapability.expiresAt > now) {
+    return opportunityInsightCapability.supported
+  }
+  if (opportunityInsightCapabilityRequest) return opportunityInsightCapabilityRequest
+
+  opportunityInsightCapabilityRequest = request<ApiHealth>('/health')
+    .then((health) => health.capabilities?.opportunityInsight === true)
+    .catch(() => false)
+    .then((supported) => {
+      opportunityInsightCapability = {
+        supported,
+        expiresAt: Date.now() + CAPABILITY_CACHE_MS,
+      }
+      return supported
+    })
+    .finally(() => {
+      opportunityInsightCapabilityRequest = undefined
+    })
+
+  return opportunityInsightCapabilityRequest
+}
+
+type InsightApiResponse = {
+  summary: string
+  signals: Array<{
+    id: string
+    label: string
+    value: string
+    tone: 'neutral' | 'positive' | 'pending' | 'risk' | 'ai'
+    source: 'activity' | 'opportunity' | 'visit' | 'ai' | 'derived'
+  }>
+  pendingChecks: Array<{
+    id: string
+    text: string
+    source: 'missing_crm_field' | 'activity_notes' | 'ai' | 'opportunity' | 'visit'
+  }>
+  actions: Array<{
+    id: string
+    title: string
+    description?: string
+    priority: 'immediate' | 'this_week' | 'later'
+    ownerName?: string | null
+    contactName?: string | null
+    dueAt?: string | null
+    dueLabel?: string | null
+    source?: string
+    actionType?: 'follow_up' | 'log_activity' | 'opportunity' | 'meeting' | 'material' | 'other'
+  }>
+  updatedAt: string
+  mode: 'deepseek' | 'heuristic' | 'copilotstudio'
+  agentName: string
+  confidence?: number
+}
+
 export const api = {
   health: () => request<ApiHealth>('/health'),
   supportsActivityInsight,
+  supportsOpportunityInsight,
   orchestrate: (
     body: {
       utterance: string
@@ -202,45 +268,69 @@ export const api = {
     }>
     refreshNonce?: string
   }) =>
-    request<{
-      summary: string
-      signals: Array<{
-        id: string
-        label: string
-        value: string
-        tone: 'neutral' | 'positive' | 'pending' | 'risk' | 'ai'
-        source: 'activity' | 'opportunity' | 'visit' | 'ai' | 'derived'
-      }>
-      pendingChecks: Array<{
-        id: string
-        text: string
-        source: 'missing_crm_field' | 'activity_notes' | 'ai' | 'opportunity' | 'visit'
-      }>
-      actions: Array<{
-        id: string
-        title: string
-        description?: string
-        priority: 'immediate' | 'this_week' | 'later'
-        ownerName?: string | null
-        contactName?: string | null
-        dueAt?: string | null
-        dueLabel?: string | null
-        source?: string
-        actionType?: 'follow_up' | 'log_activity' | 'opportunity' | 'meeting' | 'material' | 'other'
-      }>
-      evidence: {
-        activityIncluded: boolean
-        opportunityCount: number
-        recentVisitCount: number
-        crmUpdatedAt: string | null
+    request<
+      InsightApiResponse & {
+        evidence: {
+          activityIncluded: boolean
+          opportunityCount: number
+          recentVisitCount: number
+          crmUpdatedAt: string | null
+        }
+        opportunityCount?: number
+        visitCount?: number
       }
-      updatedAt: string
-      mode: 'deepseek' | 'heuristic' | 'copilotstudio'
-      agentName: string
-      opportunityCount?: number
-      visitCount?: number
-      confidence?: number
-    }>('/activity-insight', {
+    >('/activity-insight', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  opportunityInsight: (body: {
+    opportunity: {
+      id: string
+      name: string
+      accountName: string
+      accountRef?: string
+      stage: string
+      amount?: number
+      currency?: string
+      closeDate?: string
+      productLine?: string
+      quantity?: number
+      ownerName?: string
+      contactName?: string
+      syncLabel?: string
+      kind?: 'pipeline' | 'draft'
+      budgetStatus?: string
+      competition?: string
+      missingForNextStage?: string[]
+      supervisorHints?: string[]
+      lastVisit?: {
+        date: string
+        sentiment?: 'positive' | 'neutral' | 'risk'
+        summary?: string
+      } | null
+      winForecast?: { probability: number; source: 'crm' | 'ai' } | null
+      contacts?: Array<{ name: string; role?: string; title?: string }>
+    }
+    recentVisits?: Array<{
+      title: string
+      time?: string
+      status?: string
+      notes?: string
+    }>
+    refreshNonce?: string
+  }) =>
+    request<
+      InsightApiResponse & {
+        evidence: {
+          opportunityIncluded: boolean
+          recentVisitCount: number
+          missingFieldCount: number
+          crmUpdatedAt: string | null
+        }
+        visitCount?: number
+        missingFieldCount?: number
+      }
+    >('/opportunity-insight', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

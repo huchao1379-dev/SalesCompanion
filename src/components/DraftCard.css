@@ -266,6 +266,22 @@
   font-size: 0.85rem;
 }
 
+.draft-card__block-hint {
+  flex: 1 0 100%;
+  margin: 0 0 0.15rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: #92400e;
+  background: var(--warn-soft);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line));
+}
+
+:root[data-theme='dark'] .draft-card__block-hint {
+  color: #fbbf24;
+}
+
 .draft-card__error {
   color: var(--danger);
   font-size: 0.85rem;

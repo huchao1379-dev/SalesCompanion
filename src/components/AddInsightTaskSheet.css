@@ -5,7 +5,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: max(1rem, var(--safe-top)) 1rem max(1rem, var(--safe-bottom));
+  /* Keep modal clear of notches / home indicator without a large empty band */
+  padding: max(0.75rem, var(--safe-top)) 0.85rem max(0.75rem, var(--dock-bottom-inset));
   pointer-events: none;
 }
 
@@ -27,7 +28,7 @@
 .add-task-modal {
   position: relative;
   width: min(100%, 23rem);
-  max-height: min(88vh, 38rem);
+  max-height: min(88dvh, 38rem);
   overflow: hidden;
   background: var(--surface-solid);
   color: var(--text);
@@ -41,6 +42,8 @@
   flex-direction: column;
   gap: 0.7rem;
   animation: add-task-modal-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+  /* Contain focus scroll so iOS keyboard does not blow up page scale */
+  overscroll-behavior: contain;
 }
 
 .add-task-modal__body {
@@ -142,21 +145,23 @@
   color: var(--text);
   padding: 0.45rem 0.55rem;
   margin: 0;
-  font: inherit;
+  /* ≥16px prevents iOS Safari focus-zoom that scales the whole modal */
+  font-family: inherit;
+  font-size: 16px;
   line-height: 1.45;
   overflow-wrap: anywhere;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent);
+  /* Stop iOS from auto-scrolling/zooming the focused field into a bad layout */
+  touch-action: manipulation;
 }
 
 .add-task-modal__title-input {
-  font-size: 1.02rem;
   font-weight: 700;
   letter-spacing: -0.01em;
   min-height: 2.5rem;
 }
 
 .add-task-modal__desc-input {
-  font-size: 0.875rem;
   color: var(--text-secondary);
   min-height: 4.4rem;
   padding: 0.6rem 0.7rem;
@@ -205,8 +210,10 @@
   background: var(--surface-solid);
   color: var(--text);
   padding: 0.4rem 0.55rem;
-  font-size: 0.86rem;
+  /* 16px: same iOS focus-zoom guard as textareas */
+  font-size: 16px;
   font-variant-numeric: tabular-nums;
+  touch-action: manipulation;
 }
 
 .add-task-modal__field input[type='date']:disabled,

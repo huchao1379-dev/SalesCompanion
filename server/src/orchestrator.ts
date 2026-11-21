@@ -43,7 +43,7 @@ const PIPELINES: Partial<Record<Intent, PipelineDef>> = {
   },
   query_account: {
     mode: 'fanout',
-    agents: ['AccountProfile'],
+    agents: ['AccountProfile', 'OpportunityPulse'],
   },
   query_order: {
     mode: 'single',
@@ -53,6 +53,10 @@ const PIPELINES: Partial<Record<Intent, PipelineDef>> = {
     mode: 'single',
     agents: ['WorkSummary'],
   },
+  general_assist: {
+    mode: 'single',
+    agents: ['GeneralAssist'],
+  },
 }
 
 const AGENT_IDS: Record<string, string> = {
@@ -60,11 +64,13 @@ const AGENT_IDS: Record<string, string> = {
   销售Copilot: 'Orchestrator',
   实体抽取: 'EntityExtract',
   客户画像Agent: 'AccountProfile',
+  商机速览Agent: 'OpportunityPulse',
   活动创建Agent: 'ActivityCreate',
   商机创建Agent: 'OpportunityCreate',
   商机督导Agent: 'OpportunitySupervisor',
   订单查询Agent: 'OrderQuery',
   工作总结Agent: 'WorkSummary',
+  通用助手: 'GeneralAssist',
 }
 
 const AGENT_ALIASES: Record<string, string[]> = {
@@ -245,6 +251,60 @@ function reviewFor(ctx: AgentContext): ReviewFinding[] {
   return ctx.state.review || ctx.state.opportunity?.reviewFindings || ctx.state.activity?.reviewFindings || []
 }
 
+/** Deduplicate and attach shared follow-ups on the last query_account card. */
+function enrichAccountFollowUps(messages: AgentMessage[], ctx: AgentContext): AgentMessage[] {
+  if (!messages.length) return messages
+  const accountName =
+    ctx.state.account?.name ||
+    ctx.memory.accountName ||
+    messages.find((m) => m.ui?.accountKey)?.ui?.title ||
+    ''
+  const label = accountName || '这家客户'
+  const shared = [
+    `查一下${label}上个订单的物流`,
+    `帮我写一封给${label}的跟进邮件`,
+    `刚拜访完${label}，帮我生成活动草稿`,
+  ]
+  const seen = new Set<string>()
+  const followUps: string[] = []
+  for (const message of messages) {
+    for (const chip of message.ui?.followUps || message.ui?.examples || []) {
+      const key = chip.trim()
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      followUps.push(key)
+    }
+  }
+  for (const chip of shared) {
+    if (seen.has(chip)) continue
+    seen.add(chip)
+    followUps.push(chip)
+  }
+  const trimmed = followUps.slice(0, 4)
+  // Put unified chips on the last assistant card so the thread ends with one chase row.
+  return messages.map((message, index) => {
+    if (!message.ui) return message
+    if (index !== messages.length - 1) {
+      return {
+        ...message,
+        ui: {
+          ...message.ui,
+          followUps: undefined,
+          examples: undefined,
+        },
+      }
+    }
+    return {
+      ...message,
+      ui: {
+        ...message.ui,
+        followUps: trimmed,
+        examples: trimmed,
+      },
+    }
+  })
+}
+
 function synthesizeVisitComposite(ctx: AgentContext): AgentMessage[] {
   const { account, opportunity, activity, extracted } = ctx.state
   if (!activity && !opportunity) return []
@@ -333,7 +393,15 @@ function synthesizeVisitComposite(ctx: AgentContext): AgentMessage[] {
         metrics,
         facts,
         findings,
-        footnote: '草稿尚未写入业务系统；确认后才会进入同步流程。',
+        followUps: [
+          account ? `${account.name}最近怎么样？` : '仁济医院最近怎么样？',
+          '帮我写一封拜访后的跟进邮件',
+          '根据今天的跟进帮我写一段工作小结',
+        ],
+        footnote: blocked
+          ? '督导存在阻断项：请先编辑草稿补全必填信息，再确认同步。'
+          : '草稿尚未写入业务系统；确认后才会进入同步流程。',
+        tone: blocked ? 'warn' : 'info',
       },
     },
   ]
@@ -575,6 +643,8 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
         if (intent === 'capture_visit') {
           const composite = synthesizeVisitComposite(ctx)
           messages = composite.length ? composite : bag.messages
+        } else if (intent === 'query_account') {
+          messages = enrichAccountFollowUps(bag.messages, ctx)
         } else {
           messages = bag.messages
         }

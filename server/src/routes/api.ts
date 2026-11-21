@@ -1,11 +1,19 @@
 import { Router } from 'express'
-import { config, hasCopilotStudioConfig, hasDeepSeek, hasVisionModel } from '../config.js'
+import {
+  config,
+  hasCopilotStudioConfig,
+  hasDeepSeek,
+  hasVisionModel,
+  hasWebFetch,
+  hasWebSearch,
+} from '../config.js'
 import { CopilotStudioConfigurationError, copilotStudioOrchestrate } from '../copilotStudio.js'
 import { orchestrate } from '../orchestrator.js'
 import { repository } from '../store/dataverseStore.js'
 import { resolveAccount, synthesizeAccountProfile } from '../agents/accountProfile.js'
 import { getCatalogSummary, ensureAgentsRegistered } from '../agents/catalog.js'
 import { generateActivityInsight } from '../agents/activityInsight.agent.js'
+import { generateOpportunityInsight } from '../agents/opportunityInsight.agent.js'
 import type { DraftPayload, OrchestratorAttachment } from '../types.js'
 
 function normalizeAttachments(raw: unknown): OrchestratorAttachment[] {
@@ -39,6 +47,10 @@ apiRouter.get('/health', async (_req, res) => {
     agents: getCatalogSummary().length,
     capabilities: {
       activityInsight: true,
+      opportunityInsight: true,
+      generalAssist: true,
+      webSearch: hasWebSearch(),
+      webFetch: hasWebFetch(),
     },
   })
 })
@@ -139,6 +151,106 @@ apiRouter.post('/activity-insight', async (req, res) => {
       errorMessage: err instanceof Error ? err.message : 'unknown',
     })
     res.status(500).json({ error: err instanceof Error ? err.message : 'activity insight failed' })
+  }
+})
+
+/** Opportunity detail → AI 洞察（阶段缺口 + 近期拜访 + 草稿提示 → 中文建议） */
+apiRouter.post('/opportunity-insight', async (req, res) => {
+  try {
+    const opportunity = req.body?.opportunity
+    if (!opportunity || typeof opportunity !== 'object' || !String(opportunity.accountName || '').trim()) {
+      res.status(400).json({ error: 'opportunity.accountName required' })
+      return
+    }
+    if (!String(opportunity.name || '').trim() && !String(opportunity.id || '').trim()) {
+      res.status(400).json({ error: 'opportunity.name or opportunity.id required' })
+      return
+    }
+    const result = await generateOpportunityInsight({
+      opportunity: {
+        id: String(opportunity.id || 'opportunity'),
+        name: String(opportunity.name || ''),
+        accountName: String(opportunity.accountName),
+        accountRef: opportunity.accountRef ? String(opportunity.accountRef) : undefined,
+        stage: String(opportunity.stage || 'Identify'),
+        amount: typeof opportunity.amount === 'number' ? opportunity.amount : undefined,
+        currency: opportunity.currency ? String(opportunity.currency) : undefined,
+        closeDate: opportunity.closeDate ? String(opportunity.closeDate) : undefined,
+        productLine: opportunity.productLine ? String(opportunity.productLine) : undefined,
+        quantity: typeof opportunity.quantity === 'number' ? opportunity.quantity : undefined,
+        ownerName: opportunity.ownerName ? String(opportunity.ownerName) : undefined,
+        contactName: opportunity.contactName ? String(opportunity.contactName) : undefined,
+        syncLabel: opportunity.syncLabel ? String(opportunity.syncLabel) : undefined,
+        kind: opportunity.kind === 'draft' || opportunity.kind === 'pipeline' ? opportunity.kind : undefined,
+        budgetStatus: opportunity.budgetStatus ? String(opportunity.budgetStatus) : undefined,
+        competition: opportunity.competition ? String(opportunity.competition) : undefined,
+        missingForNextStage: Array.isArray(opportunity.missingForNextStage)
+          ? opportunity.missingForNextStage.map((s: unknown) => String(s || '')).filter(Boolean)
+          : undefined,
+        supervisorHints: Array.isArray(opportunity.supervisorHints)
+          ? opportunity.supervisorHints.map((s: unknown) => String(s || '')).filter(Boolean)
+          : undefined,
+        lastVisit:
+          opportunity.lastVisit && typeof opportunity.lastVisit === 'object'
+            ? {
+                date: String(opportunity.lastVisit.date || ''),
+                sentiment:
+                  opportunity.lastVisit.sentiment === 'positive' ||
+                  opportunity.lastVisit.sentiment === 'risk' ||
+                  opportunity.lastVisit.sentiment === 'neutral'
+                    ? opportunity.lastVisit.sentiment
+                    : undefined,
+                summary: opportunity.lastVisit.summary
+                  ? String(opportunity.lastVisit.summary)
+                  : undefined,
+              }
+            : null,
+        winForecast:
+          opportunity.winForecast &&
+          typeof opportunity.winForecast === 'object' &&
+          typeof opportunity.winForecast.probability === 'number'
+            ? {
+                probability: opportunity.winForecast.probability,
+                source: opportunity.winForecast.source === 'crm' ? 'crm' : 'ai',
+              }
+            : null,
+        contacts: Array.isArray(opportunity.contacts)
+          ? opportunity.contacts
+              .filter((c: unknown) => c && typeof c === 'object')
+              .map((c: { name?: string; role?: string; title?: string }) => ({
+                name: String(c.name || ''),
+                role: c.role ? String(c.role) : undefined,
+                title: c.title ? String(c.title) : undefined,
+              }))
+              .filter((c: { name: string }) => c.name)
+          : undefined,
+      },
+      recentVisits: Array.isArray(req.body?.recentVisits)
+        ? req.body.recentVisits
+            .filter((v: unknown) => v && typeof v === 'object')
+            .map((v: { title?: string; time?: string; status?: string; notes?: string }) => ({
+              title: String(v.title || ''),
+              time: v.time ? String(v.time) : undefined,
+              status: v.status ? String(v.status) : undefined,
+              notes: v.notes ? String(v.notes) : undefined,
+            }))
+            .filter((v: { title: string }) => v.title)
+        : undefined,
+      refreshNonce:
+        typeof req.body?.refreshNonce === 'string'
+          ? req.body.refreshNonce.slice(0, 64)
+          : undefined,
+    })
+    res.json(result)
+  } catch (err) {
+    await repository.writeLog({
+      agentName: 'OpportunityInsight',
+      inputSummary: String(req.body?.opportunity?.name || req.body?.opportunity?.accountName || ''),
+      latencyMs: 0,
+      success: false,
+      errorMessage: err instanceof Error ? err.message : 'unknown',
+    })
+    res.status(500).json({ error: err instanceof Error ? err.message : 'opportunity insight failed' })
   }
 })
 

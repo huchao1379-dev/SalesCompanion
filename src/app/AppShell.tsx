@@ -202,6 +202,7 @@ export function AppShell() {
                 setAccountKey(key)
                 goScreen('account')
               }}
+              onAskCopilot={(prompt) => openChat(prompt)}
             />
           ) : null}
           {screen === 'account' ? (

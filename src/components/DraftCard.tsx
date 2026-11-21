@@ -1,6 +1,13 @@
 import './DraftCard.css'
 import type { DraftPayload, OpportunityDraftPayload } from '../agents/types'
-import { canConfirm, canEditDraft, canRetrySync, SYNC_STATUS_LABEL } from '../data/syncStatus'
+import {
+  canConfirm,
+  canConfirmDraft,
+  canEditDraft,
+  canRetrySync,
+  isConfirmBlocked,
+  SYNC_STATUS_LABEL,
+} from '../data/syncStatus'
 import { AgentLabel } from './AgentLabel'
 import { SourceChips } from './SourceChips'
 import { SyncStatusBadge } from './SyncStatusBadge'
@@ -423,11 +430,22 @@ export function DraftCard({
       <footer className="draft-card__actions">
         {canConfirm(draft.syncStatus) ? (
           <>
+            {isConfirmBlocked(draft) ? (
+              <p className="draft-card__block-hint" role="status">
+                督导存在阻断项，请先补全必填信息后再确认。
+              </p>
+            ) : null}
             <button
               type="button"
               className="btn btn--primary"
-              disabled={busy}
-              onClick={() => onConfirm(draft)}
+              disabled={busy || !canConfirmDraft(draft)}
+              title={
+                isConfirmBlocked(draft) ? '请先处理督导阻断项后再确认' : undefined
+              }
+              onClick={() => {
+                if (!canConfirmDraft(draft)) return
+                onConfirm(draft)
+              }}
             >
               确认并同步
             </button>

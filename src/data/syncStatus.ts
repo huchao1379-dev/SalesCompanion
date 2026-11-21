@@ -1,4 +1,4 @@
-import type { SyncStatus } from '../agents/types'
+import type { DraftPayload, SyncStatus } from '../agents/types'
 
 export const SYNC_STATUS_LABEL: Record<SyncStatus, string> = {
   Draft: 'AI 草稿',
@@ -15,6 +15,15 @@ export function canEditDraft(status: SyncStatus): boolean {
 
 export function canConfirm(status: SyncStatus): boolean {
   return status === 'Draft'
+}
+
+/** Supervisor block must be cleared (e.g. fill account) before Confirm. */
+export function isConfirmBlocked(draft: Pick<DraftPayload, 'reviewStatus' | 'syncStatus'>): boolean {
+  return canConfirm(draft.syncStatus) && draft.reviewStatus === 'blocked'
+}
+
+export function canConfirmDraft(draft: Pick<DraftPayload, 'reviewStatus' | 'syncStatus'>): boolean {
+  return canConfirm(draft.syncStatus) && draft.reviewStatus !== 'blocked'
 }
 
 export function canRetrySync(status: SyncStatus): boolean {

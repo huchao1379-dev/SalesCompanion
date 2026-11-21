@@ -49,6 +49,9 @@ npm run dev
 | `DEEPSEEK_API_KEY` | 可选；不填则启发式 |
 | `DEEPSEEK_MODEL` | 默认 `deepseek-chat` |
 | `DATAVERSE_URL` / `DATAVERSE_TOKEN` | 可选；不填用内存种子 |
+| `WEB_SEARCH_API_KEY` | 可选；通用助手实时网页检索（Serper/Tavily） |
+| `WEB_SEARCH_PROVIDER` | `serper`（默认）或 `tavily` |
+| `WEB_FETCH_ENABLED` | 可选；抓取 https 页面（有搜索 Key 时默认开启） |
 
 Demo 默认不依赖 Copilot Studio / AI Builder；Copilot Studio 连接保留为可选路径（显式 `AI_PROVIDER=copilotstudio` 才启用）。
 

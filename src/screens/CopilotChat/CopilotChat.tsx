@@ -25,13 +25,16 @@ import { MessageUiCard } from '../../components/MessageUiCard'
 import { SourceChips } from '../../components/SourceChips'
 import {
   appendMessages,
+  clearAccountContext,
   clearConversation,
   loadConversation,
   replaceMessage,
   updateMessage,
   type ConversationState,
 } from '../../data/conversationStore'
+import { api } from '../../api/client'
 import { confirmAndSyncDetailed, discardDraft, listDrafts, upsertDraft } from '../../data/dataverse'
+import { canConfirmDraft } from '../../data/syncStatus'
 import { useWebSpeech } from '../../speech/useWebSpeech'
 
 type PendingAttachment = {
@@ -66,11 +69,58 @@ const PROGRESS_PHASES = [
   { afterMs: 4200, label: '正在整理答复' },
 ] as const
 
+function progressPhasesFor(utterance: string, hasAttachments: boolean) {
+  if (hasAttachments) {
+    return [
+      { afterMs: 0, label: '正在理解附件与问题' },
+      { afterMs: 1800, label: '正在调用相关能力' },
+      { afterMs: 4500, label: '正在整理答复' },
+    ]
+  }
+  const t = utterance.trim()
+  if (/写.*(邮件|信|话术|开场)|会议准备|卖点|异议|翻译|搜索|搜一下|查一下网上|https?:\/\//i.test(t)) {
+    return [
+      { afterMs: 0, label: '正在理解助手请求' },
+      { afterMs: 1500, label: '正在检索或起草内容' },
+      { afterMs: 4000, label: '正在整理助手答复' },
+    ]
+  }
+  if (/拜访|录入|记一下|建草稿|刚见|刚拜访/.test(t)) {
+    return [
+      { afterMs: 0, label: '正在抽取拜访要素' },
+      { afterMs: 1600, label: '正在生成活动与商机草稿' },
+      { afterMs: 4200, label: '正在督导核对' },
+    ]
+  }
+  if (/订单|物流|发货|清关|运单|ETA/i.test(t)) {
+    return [
+      { afterMs: 0, label: '正在识别订单问题' },
+      { afterMs: 1500, label: '正在查询订单与物流' },
+      { afterMs: 3800, label: '正在整理物流答复' },
+    ]
+  }
+  if (/日报|周报|工作总结|工作小结|今日小结/.test(t)) {
+    return [
+      { afterMs: 0, label: '正在汇总今日跟进' },
+      { afterMs: 1600, label: '正在整理工作小结' },
+      { afterMs: 3800, label: '正在生成总结文案' },
+    ]
+  }
+  if (/怎么样|画像|信用|商机|近访|客户|医院/.test(t)) {
+    return [
+      { afterMs: 0, label: '正在识别客户' },
+      { afterMs: 1400, label: '正在并行查询画像与商机' },
+      { afterMs: 3800, label: '正在合成客户速览' },
+    ]
+  }
+  return [...PROGRESS_PHASES]
+}
+
 const HELP_ITEMS = [
   '一句话录入拜访，生成活动与商机草稿',
   '查询客户画像、信用与开放商机（带来源）',
   '查询订单物流，或把今日跟进写成日报素材',
-  '上传图片 / 文本附件，结合内容一起处理',
+  '写话术/跟进邮件、会议准备；可检索公开网页资料（需配置联网）',
 ]
 
 const QUICK_CHIPS = [
@@ -80,6 +130,8 @@ const QUICK_CHIPS = [
   },
   { label: '查客户画像', prompt: '帮我看看这家客户最近怎么样，信用和开放商机如何？' },
   { label: '查订单物流', prompt: '查一下最近一笔订单的物流进度。' },
+  { label: '写跟进邮件', prompt: '帮我写一封拜访后的跟进邮件，语气专业简洁。' },
+  { label: '搜索资料', prompt: '帮我搜索一下医疗设备集采相关的公开政策要点。' },
   { label: '写今日小结', prompt: '根据今天的跟进帮我写一段工作小结。' },
 ] as const
 
@@ -291,12 +343,14 @@ function NativeChat({
   const [composerMode, setComposerMode] = useState<'text' | 'voice'>('text')
   const [voiceHint, setVoiceHint] = useState('')
   const [syncNotice, setSyncNotice] = useState('')
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false)
 
   const messages = useMemo(() => conversation.messages, [conversation.messages])
   const isEmpty = messages.length === 0
   const hasSendable = Boolean(input.trim() || attachments.length)
   const canSend = hasSendable && !busy && !generating && composerMode === 'text'
   const accountKey = conversation.context.accountRef || conversation.context.accountId
+  const activeAccountName = conversation.context.accountName?.trim() || ''
 
   useEffect(() => {
     const isIOS =
@@ -305,6 +359,21 @@ function NativeChat({
     if (isIOS) return
     const t = window.setTimeout(() => inputRef.current?.focus(), 60)
     return () => window.clearTimeout(t)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    void api
+      .health()
+      .then((health) => {
+        if (!cancelled) setWebSearchEnabled(Boolean(health.capabilities?.webSearch))
+      })
+      .catch(() => {
+        if (!cancelled) setWebSearchEnabled(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const attachmentsRef = useRef(attachments)
@@ -429,16 +498,11 @@ function NativeChat({
   function startProgressTicker(
     assistantId: string,
     generationId: number,
+    utterance: string,
     hasAttachments: boolean,
   ) {
     const timers: number[] = []
-    const phases = hasAttachments
-      ? [
-          { afterMs: 0, label: '正在理解附件与问题' },
-          { afterMs: 1800, label: '正在调用相关能力' },
-          { afterMs: 4500, label: '正在整理答复' },
-        ]
-      : PROGRESS_PHASES
+    const phases = progressPhasesFor(utterance, hasAttachments)
     for (const phase of phases) {
       if (phase.afterMs === 0) continue
       const t = window.setTimeout(() => {
@@ -489,7 +553,7 @@ function NativeChat({
       confidence: 0,
       createdAt: stamp,
       deliveryStatus: 'pending',
-      progressLabel: hasAttachments ? '正在理解附件与问题' : PROGRESS_PHASES[0].label,
+      progressLabel: progressPhasesFor(utterance, hasAttachments)[0]?.label || PROGRESS_PHASES[0].label,
       retryUtterance: utterance,
     }
 
@@ -502,7 +566,7 @@ function NativeChat({
         createdAt: stamp,
         completedAt: undefined,
         deliveryStatus: 'pending',
-        progressLabel: PROGRESS_PHASES[0].label,
+        progressLabel: progressPhasesFor(utterance, hasAttachments)[0]?.label || PROGRESS_PHASES[0].label,
         failureKind: undefined,
         retryUtterance: utterance,
         agent_name: BOT_NAME,
@@ -514,7 +578,7 @@ function NativeChat({
     setConversationState(base)
 
     const handle = genRef.current!
-    const stopTicker = startProgressTicker(assistantId, generationId, hasAttachments)
+    const stopTicker = startProgressTicker(assistantId, generationId, utterance, hasAttachments)
 
     try {
       const runAgent = CHAT_PROVIDER === 'deepseek' ? orchestrate : copilotOrchestrate
@@ -736,6 +800,10 @@ function NativeChat({
   }
 
   async function handleConfirm(draft: DraftPayload) {
+    if (!canConfirmDraft(draft)) {
+      setSyncNotice('督导存在阻断项，请先补全必填信息后再确认同步。')
+      return
+    }
     setBusy(true)
     setSyncNotice('')
     try {
@@ -834,6 +902,22 @@ function NativeChat({
         </div>
       </header>
 
+      {activeAccountName ? (
+        <div className="chat-context-bar" role="status">
+          <span className="chat-context-bar__label">当前客户</span>
+          <strong className="chat-context-bar__name">{activeAccountName}</strong>
+          <button
+            type="button"
+            className="chat-context-bar__clear"
+            aria-label="清除当前客户上下文"
+            title="清除上下文"
+            onClick={() => setConversationState(clearAccountContext(conversationRef.current))}
+          >
+            清除
+          </button>
+        </div>
+      ) : null}
+
       <div
         className="chat-screen__body"
         ref={bodyRef}
@@ -857,6 +941,9 @@ function NativeChat({
             </div>
             <p className="chat-empty__hint">
               输入问题、点快捷入口，或上传图片/文本附件。麦克风可切换语音输入。Enter 发送，Shift+Enter 换行。
+              {webSearchEnabled
+                ? ' 已启用网页检索，可直接问公开政策或资料。'
+                : ' 通用问答可用；实时网页检索需在 server/.env 配置 WEB_SEARCH_API_KEY。'}
             </p>
           </div>
         ) : (

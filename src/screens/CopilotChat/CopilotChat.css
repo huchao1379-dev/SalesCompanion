@@ -35,6 +35,62 @@
   font-weight: 750;
 }
 
+.chat-context-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 1rem;
+  background: color-mix(in srgb, #14b8a6 10%, #f3f5f8);
+  border-bottom: 1px solid color-mix(in srgb, #14b8a6 18%, rgba(17, 24, 39, 0.06));
+  min-width: 0;
+}
+
+.chat-context-bar__label {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #0f766e;
+}
+
+.chat-context-bar__name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-context-bar__clear {
+  flex-shrink: 0;
+  appearance: none;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-solid);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  min-height: 28px;
+  cursor: pointer;
+}
+
+.chat-context-bar__clear:hover {
+  color: var(--text);
+}
+
+:root[data-theme='dark'] .chat-context-bar {
+  background: color-mix(in srgb, #14b8a6 14%, var(--bg-soft));
+  border-bottom-color: color-mix(in srgb, #14b8a6 22%, var(--line));
+}
+
+:root[data-theme='dark'] .chat-context-bar__label {
+  color: #5eead4;
+}
+
 .chat-screen__back,
 .chat-screen__back-spacer {
   width: var(--control-size);
@@ -536,7 +592,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-  padding: 0.55rem 0.9rem calc(0.55rem + var(--dock-bottom-inset));
+  padding: 0.55rem 0.9rem calc(var(--dock-pad-bottom, 0.55rem) + var(--dock-bottom-inset));
   background: #f3f5f8;
   border-top: 1px solid rgba(17, 24, 39, 0.04);
   box-sizing: border-box;
@@ -562,8 +618,8 @@
   font-weight: 650;
   cursor: pointer;
   max-width: 100%;
-  flex: 1 1 calc(50% - 0.45rem);
-  min-width: 0;
+  flex: 1 1 calc(33.333% - 0.45rem);
+  min-width: 5.5rem;
   min-height: 40px;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;

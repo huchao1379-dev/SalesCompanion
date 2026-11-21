@@ -144,6 +144,7 @@ export type MessageUiBlock = {
     | 'work_summary'
     | 'capture_result'
     | 'review'
+    | 'general_assist'
   title?: string
   metrics?: MessageUiMetric[]
   items?: MessageUiItem[]
@@ -160,6 +161,8 @@ export type MessageUiBlock = {
   /** Clarify card: one focused question plus tappable examples. */
   question?: string
   examples?: string[]
+  /** Dynamic follow-up chips under any rich answer. */
+  followUps?: string[]
   /** Work summary / capture result structured sections. */
   sections?: Array<{
     heading?: string
@@ -334,4 +337,5 @@ export type Intent =
   | 'query_account'
   | 'query_order'
   | 'work_summary'
+  | 'general_assist'
   | 'clarify'

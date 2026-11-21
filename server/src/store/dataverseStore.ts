@@ -259,6 +259,9 @@ export class SeedMemoryRepository implements SalesRepository {
     if (!draft) throw new Error('Draft not found')
     if (draft.syncStatus === 'Synced') return draft
     if (draft.syncStatus === 'Discarded') throw new Error('Draft already discarded')
+    if (draft.reviewStatus === 'blocked') {
+      throw new Error('督导存在阻断项，请先补全必填信息后再确认')
+    }
 
     this.updateDraftStatus(idempotencyKey, 'Confirmed', { syncError: undefined })
     this.updateDraftStatus(idempotencyKey, 'Syncing')

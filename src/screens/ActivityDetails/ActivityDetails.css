@@ -4,7 +4,7 @@
   flex-direction: column;
   gap: var(--space-3);
   /* No top padding — header sits flush under the status bar / shell */
-  padding: 0 var(--space-4) calc(7.5rem + var(--dock-bottom-inset));
+  padding: 0 var(--space-4) calc(7.25rem + var(--dock-bottom-inset));
   background:
     radial-gradient(110% 60% at 100% 0%, color-mix(in srgb, var(--blue-soft) 70%, transparent) 0%, transparent 45%),
     linear-gradient(180deg, color-mix(in srgb, var(--bg-soft) 88%, #dfe8f3) 0%, var(--bg) 100%);

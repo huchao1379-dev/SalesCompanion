@@ -48,6 +48,8 @@
   /* Extra clearance for iOS Safari / Android Chrome chrome; synced by useBrowserBottomInset. */
   --browser-bottom: 0px;
   --dock-bottom-inset: max(var(--safe-bottom), var(--browser-bottom));
+  /* Base dock padding under controls; platform overrides below */
+  --dock-pad-bottom: 0.7rem;
   --tab-h: 118px;
   /* Touch / control geometry — keep ≥44px hit area on phones */
   --touch-min: 44px;
@@ -207,6 +209,15 @@ p {
 
 .app-shell.has-dock {
   padding-bottom: calc(var(--tab-h) + var(--dock-bottom-inset));
+}
+
+/* Android: tighten dock clearance — gesture bar + chrome already reserve space */
+:root[data-platform='android'] {
+  --dock-pad-bottom: 0.4rem;
+}
+
+:root[data-platform='ios'] {
+  --dock-pad-bottom: 0.6rem;
 }
 
 .app-shell.has-dock--compact {

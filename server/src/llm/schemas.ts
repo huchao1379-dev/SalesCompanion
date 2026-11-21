@@ -3,7 +3,14 @@ import { z } from 'zod'
 const confidence = z.number().min(0).max(1).optional()
 
 export const intentOutputSchema = z.object({
-  intent: z.enum(['capture_visit', 'query_account', 'query_order', 'work_summary', 'clarify']),
+  intent: z.enum([
+    'capture_visit',
+    'query_account',
+    'query_order',
+    'work_summary',
+    'general_assist',
+    'clarify',
+  ]),
   confidence,
   reason: z.string().max(200).optional(),
   needsClarification: z.boolean().optional(),
@@ -150,12 +157,72 @@ export const activityInsightOutputSchema = z.object({
   confidence: z.number().min(0).max(1).optional(),
 })
 
+/** Opportunity detail AI insight — LLM may only fill the same narrative fields as activity. */
+export const opportunityInsightLlmOutputSchema = activityInsightLlmOutputSchema
+
+export const opportunityInsightEvidenceSchema = z.object({
+  opportunityIncluded: z.boolean().default(true),
+  recentVisitCount: z.number().int().min(0).default(0),
+  missingFieldCount: z.number().int().min(0).default(0),
+  crmUpdatedAt: z.string().nullable().optional().default(null),
+})
+
+export const opportunityInsightOutputSchema = z.object({
+  summary: z.string().min(1).max(400),
+  signals: z.array(insightSignalSchema).max(5).default([]),
+  pendingChecks: z.array(insightPendingCheckSchema).max(6).default([]),
+  actions: z.array(insightActionSchema).max(5).default([]),
+  evidence: opportunityInsightEvidenceSchema,
+  updatedAt: z.string().min(1),
+  mode: z.enum(['deepseek', 'heuristic', 'copilotstudio']),
+  agentName: z.string().min(1).default('商机洞察 Agent'),
+  visitCount: z.number().int().min(0).optional(),
+  missingFieldCount: z.number().int().min(0).optional(),
+  /** Internal only — clients must not render as win probability. */
+  confidence: z.number().min(0).max(1).optional(),
+})
+
 export const clarifyOutputSchema = z.object({
   reply: z.string().min(1),
   question: z.string().optional(),
   confidence,
   focus: z.enum(['capability', 'greeting', 'missing_info', 'other']).optional(),
   examples: z.array(z.string().min(1)).max(3).optional(),
+})
+
+export const generalAssistOutputSchema = z.object({
+  answer: z.string().min(1),
+  title: z.string().optional(),
+  sections: z
+    .array(
+      z.object({
+        heading: z.string().optional(),
+        bullets: z
+          .array(
+            z.object({
+              text: z.string().min(1),
+              activityId: z.string().optional(),
+              status: z.string().optional(),
+            }),
+          )
+          .min(1)
+          .max(8),
+      }),
+    )
+    .max(4)
+    .optional(),
+  followUps: z.array(z.string().min(1).max(80)).max(4).optional(),
+  confidence,
+  usedWeb: z.boolean().optional(),
+  sources: z
+    .array(
+      z.object({
+        label: z.string().min(1),
+        url: z.string().optional(),
+      }),
+    )
+    .max(6)
+    .optional(),
 })
 
 export const searchAccountsArgsSchema = z.object({

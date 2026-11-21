@@ -4,8 +4,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  /* No top padding — ScreenHeader sits flush; horizontal pad only. */
-  padding: 0 var(--space-4) 1.5rem;
+  /* No top padding — ScreenHeader sits flush; bottom clears home indicator */
+  padding: 0 var(--space-4) calc(1.25rem + var(--dock-bottom-inset));
   background:
     radial-gradient(120% 70% at 0% -5%, color-mix(in srgb, var(--green-soft) 55%, transparent) 0%, transparent 42%),
     radial-gradient(90% 55% at 100% 0%, color-mix(in srgb, var(--blue-soft) 70%, transparent) 0%, transparent 45%),
@@ -16,6 +16,7 @@
   min-height: 100%;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   scrollbar-width: none;
 }
 
@@ -451,12 +452,15 @@
   background: var(--surface-solid);
   color: var(--text);
   padding: 0.75rem 0.85rem;
-  min-height: 7.5rem;
+  min-height: 8.5rem;
+  box-sizing: border-box;
 }
 
 .capture-screen__content-display {
   overflow: auto;
-  max-height: 12rem;
+  /* Allow longer visit notes to remain readable without feeling clipped */
+  max-height: min(42vh, 18rem);
+  -webkit-overflow-scrolling: touch;
 }
 
 .capture-screen__content-display.is-empty {
@@ -471,9 +475,10 @@
 .capture-screen__content-display p,
 .capture-screen__content-placeholder {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 16px;
   line-height: 1.55;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
@@ -484,8 +489,14 @@
 
 .capture-screen__content-input {
   resize: vertical;
-  font: inherit;
+  /* Do not use font:inherit — it would drop below 16px and trigger iOS zoom */
+  font-family: inherit;
+  font-size: 16px;
   line-height: 1.5;
+  min-height: 9rem;
+  max-height: min(50vh, 22rem);
+  touch-action: manipulation;
+  field-sizing: content;
 }
 
 .capture-screen__ai-summary {
@@ -528,9 +539,10 @@
 
 .capture-screen__ai-summary-body {
   margin: 0;
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   line-height: 1.55;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
   color: var(--text);
 }
@@ -633,6 +645,10 @@
   padding: 0.7rem 0.85rem;
   resize: vertical;
   min-height: 4.5rem;
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1.5;
+  touch-action: manipulation;
 }
 
 .capture-screen__mock-banner {
@@ -946,7 +962,17 @@
   .capture-screen {
     padding-left: var(--space-3);
     padding-right: var(--space-3);
+    padding-bottom: calc(1rem + var(--dock-bottom-inset));
     gap: 0.65rem;
+  }
+
+  .capture-screen__content-display {
+    max-height: min(48vh, 20rem);
+  }
+
+  .capture-screen__content-input {
+    min-height: 8rem;
+    max-height: min(55vh, 24rem);
   }
 
   .capture-screen > .screen-header {

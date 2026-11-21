@@ -1,5 +1,5 @@
 import './AddInsightTaskSheet.css'
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { IconClose } from './DashIcons'
 import { IconButton } from './IconButton'
@@ -41,8 +41,6 @@ export function AddInsightTaskSheet({
   const dateId = useId()
   const startId = useId()
   const endId = useId()
-  const titleInputRef = useRef<HTMLTextAreaElement | null>(null)
-
   const today = useMemo(() => formatDateKey(new Date()), [])
   const weekQuick = useMemo(() => suggestDueDate('this_week'), [])
   const laterQuick = useMemo(() => suggestDueDate('later'), [])
@@ -75,15 +73,6 @@ export function AddInsightTaskSheet({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose, saving])
-
-  useEffect(() => {
-    if (!editing) return
-    const t = window.setTimeout(() => {
-      titleInputRef.current?.focus()
-      titleInputRef.current?.select()
-    }, 30)
-    return () => window.clearTimeout(t)
-  }, [editing])
 
   if (!open || !action || typeof document === 'undefined') return null
 
@@ -171,13 +160,13 @@ export function AddInsightTaskSheet({
             <span className="add-task-modal__editable-hint">标题</span>
             {editing ? (
               <textarea
-                ref={titleInputRef}
                 id={titleFieldId}
                 className="add-task-modal__title-input"
                 rows={2}
                 value={title}
                 disabled={saving}
                 placeholder="输入任务标题"
+                enterKeyHint="next"
                 onChange={(e) => setTitle(e.target.value)}
               />
             ) : (

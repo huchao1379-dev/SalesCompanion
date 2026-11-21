@@ -5,7 +5,14 @@ import type { ConversationTurn } from './agentTypes.js'
 import { INTENT_SYSTEM } from './prompts.js'
 import { nowIsoInZone } from '../util/datetime.js'
 
-const INTENTS: Intent[] = ['capture_visit', 'query_account', 'query_order', 'work_summary', 'clarify']
+const INTENTS: Intent[] = [
+  'capture_visit',
+  'query_account',
+  'query_order',
+  'work_summary',
+  'general_assist',
+  'clarify',
+]
 
 export type IntentFocus = 'capability' | 'greeting' | 'missing_info' | 'ambiguous' | 'none'
 
@@ -107,6 +114,14 @@ function heuristicIntent(utterance: string, options: IntentOptions): Omit<Intent
   if (/日报|周报|工作总结|工作小结|今日小结|今日总结|帮我写.*总结|写.*日报|写.*周报/.test(text)) {
     return result('work_summary', 0.9, '工作总结', false, [], 'none')
   }
+  if (
+    /写.*(邮件|信|话术|开场|微信)|跟进邮件|感谢信|会议准备|准备会议|议程|卖点|怎么讲|异议处理|翻译|搜索|搜一下|查一下网上|打开链接|https?:\/\//i.test(
+      text,
+    ) ||
+    (/帮我(写|改|润色|起草|准备)/.test(text) && !/拜访|录入|商机草稿|活动草稿/.test(text))
+  ) {
+    return result('general_assist', 0.88, '通用助手', false, [], 'none')
+  }
   if (/订单|物流|清关|发货|到港|运单|shipment|order/i.test(text)) {
     return result(
       'query_order',
@@ -162,6 +177,11 @@ function heuristicIntent(utterance: string, options: IntentOptions): Omit<Intent
       hasAccountContext ? ['action'] : ['account', 'action'],
       'ambiguous',
     )
+  }
+
+  // Default unknown non-CRM phrasing to general assistant instead of a dead-end clarify.
+  if (text.length >= 4) {
+    return result('general_assist', 0.64, '通用问答', false, [], 'none')
   }
 
   return result('clarify', 0.6, '信息不足', true, ['action'], 'missing_info')

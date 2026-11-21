@@ -80,15 +80,15 @@ export function heuristicClarify(utterance: string, opts?: ClarifyOptions): Agen
 
   if (focus === 'capability' || /你能做|能做什么|有什么功能|怎么用|你会什么|帮我什么|告诉我你能|capabilities|what can you/i.test(t)) {
     const reply = snippet
-      ? `你在问「${snippet}」——我可以把一句拜访口述变成活动/商机草稿，也能查客户画像、订单物流和写工作总结。`
-      : '我可以把一句拜访口述变成活动/商机草稿，也能查客户画像、订单物流和写工作总结。'
+      ? `你在问「${snippet}」——我能录入拜访草稿、查客户画像/订单物流、写工作小结，也能帮你写话术/邮件、做会议准备；配置联网后还可检索公开网页资料。`
+      : '我能录入拜访草稿、查客户画像/订单物流、写工作小结，也能帮你写话术/邮件、做会议准备；配置联网后还可检索公开网页资料。'
     return makeClarifyMessage({
       reply,
       question: '你今天想先处理哪件事？',
       examples: [
         '刚拜访仁济医院张主任，N17 要 12 台，下周三再约',
         '仁济医院最近怎么样？',
-        '查一下 Hospital Alpha 上个订单的物流',
+        '帮我写一封拜访后的跟进邮件',
       ],
       confidence: 0.82,
       focus: 'capability',
@@ -97,9 +97,9 @@ export function heuristicClarify(utterance: string, opts?: ClarifyOptions): Agen
 
   if (focus === 'greeting' || (/你好|嗨|在吗|hello|hi\b/i.test(lower) && t.length < 12)) {
     return makeClarifyMessage({
-      reply: '你好，我是销售 Copilot。今天想先录入拜访、查客户，还是看订单物流？',
+      reply: '你好，我是销售 Copilot。可以录入拜访、查客户/订单，也能写话术邮件或检索公开资料。',
       question: '今天想先做哪件事？',
-      examples: ['帮我写今日工作小结', 'Hospital Beta 最新进度怎么样'],
+      examples: ['帮我写今日工作小结', 'Hospital Beta 最新进度怎么样', '监护仪开场话术怎么讲'],
       confidence: 0.76,
       focus: 'greeting',
     })

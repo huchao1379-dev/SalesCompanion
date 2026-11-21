@@ -40,6 +40,18 @@ export function clearConversation() {
   return next
 }
 
+/** Drop active-account memory so follow-up pronouns do not stick to the wrong hospital. */
+export function clearAccountContext(state: ConversationState): ConversationState {
+  const context = { ...state.context }
+  delete context.accountId
+  delete context.accountName
+  delete context.accountRef
+  delete context.opportunityId
+  delete context.lastActivityKey
+  delete context.lastOpportunityKey
+  return saveConversation({ ...state, context })
+}
+
 export function appendMessages(
   state: ConversationState,
   messages: AgentMessage[],

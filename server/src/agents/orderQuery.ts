@@ -147,6 +147,12 @@ function messageFromFacts(utterance: string, facts: OrderFacts): AgentMessage {
           },
         ],
         accountKey: facts.account.externalKey || facts.account.id,
+        followUps: [
+          `${facts.account.name}最近怎么样？`,
+          `帮我写一封给${facts.account.name}的跟进邮件`,
+          `刚拜访完${facts.account.name}，帮我生成活动草稿`,
+        ],
+        footnote: '订单与物流来自种子数据，请核实。',
       }
     : undefined
 

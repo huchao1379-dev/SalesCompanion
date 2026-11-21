@@ -1,10 +1,15 @@
 import './OpportunityDetail.css'
-import { useEffect, useMemo, useState } from 'react'
+import '../../components/InsightPanel.css'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
 import type { OpportunityDraftPayload } from '../../agents/types'
+import { AddInsightTaskSheet } from '../../components/AddInsightTaskSheet'
 import {
   IconBuilding,
   IconCheck,
+  IconChevronDown,
   IconChevronRight,
+  IconChevronUp,
   IconEdit,
   IconMore,
   IconPhone,
@@ -14,6 +19,7 @@ import {
   IconUser,
 } from '../../components/DashIcons'
 import { DraftCard } from '../../components/DraftCard'
+import { IconButton } from '../../components/IconButton'
 import { ScreenHeader } from '../../components/ScreenHeader'
 import { confirmAndSyncDetailed, discardDraft, upsertDraft } from '../../data/dataverse'
 import {
@@ -26,6 +32,16 @@ import {
   type OpportunityDetail,
   type SaveStatus,
 } from '../../data/opportunityDetail'
+import {
+  fetchOpportunityInsight,
+  formatCrmAsOf,
+  formatInsightUpdatedAt,
+  PRIORITY_LABEL,
+  relatedVisitsForOpportunity,
+  type InsightAction,
+  type InsightSignalTone,
+  type OpportunityInsightView,
+} from '../../data/opportunityInsight'
 import { STAGE_LABEL, formatMoney } from '../../data/pipeline'
 import { isOnline } from '../../data/offlineQueue'
 
@@ -35,7 +51,11 @@ type Props = {
   onBack: () => void
   onOpenCapture: (accountKey?: string) => void
   onOpenAccount?: (accountKey: string) => void
+  onAskCopilot?: (prompt: string) => void
 }
+
+const ACTIONS_PREVIEW = 3
+const PENDING_PREVIEW = 4
 
 const SAVE_LABEL: Record<SaveStatus, string> = {
   idle: '',
@@ -52,6 +72,7 @@ export function OpportunityDetailScreen({
   onBack,
   onOpenCapture,
   onOpenAccount,
+  onAskCopilot,
 }: Props) {
   const [detail, setDetail] = useState<OpportunityDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -64,8 +85,19 @@ export function OpportunityDetailScreen({
   const [confirmAction, setConfirmAction] = useState<null | 'advance' | 'won' | 'lost' | 'sync' | 'visit'>(null)
   const [timelineOpen, setTimelineOpen] = useState(true)
   const [infoOpen, setInfoOpen] = useState(true)
-  const [insightsOpen, setInsightsOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [insightOpen, setInsightOpen] = useState(false)
+  const [insight, setInsight] = useState<OpportunityInsightView | null>(null)
+  const [insightLoading, setInsightLoading] = useState(false)
+  const [insightError, setInsightError] = useState<string | null>(null)
+  const [actionsExpanded, setActionsExpanded] = useState(false)
+  const [copiedActionId, setCopiedActionId] = useState<string | null>(null)
+  const [taskAction, setTaskAction] = useState<InsightAction | null>(null)
+  const [addedTaskIds, setAddedTaskIds] = useState<Set<string>>(() => new Set())
+  const insightRefreshCount = useRef(0)
+  const insightLoadingRef = useRef(false)
+  const contactsRef = useRef<HTMLUListElement | null>(null)
+  const insightPanelId = useId()
 
   async function reload() {
     setLoading(true)
@@ -91,6 +123,101 @@ export function OpportunityDetailScreen({
     void reload()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opportunityId])
+
+  useEffect(() => {
+    setInsight(null)
+    setInsightOpen(false)
+    setInsightError(null)
+    setActionsExpanded(false)
+    setCopiedActionId(null)
+    setTaskAction(null)
+    setAddedTaskIds(new Set())
+    insightRefreshCount.current = 0
+  }, [opportunityId])
+
+  const recentVisits = useMemo(
+    () => (detail ? relatedVisitsForOpportunity(detail) : []),
+    [detail],
+  )
+
+  const loadInsight = useCallback(
+    async (opts?: { forceOpen?: boolean }) => {
+      if (!detail || insightLoadingRef.current) return
+      insightLoadingRef.current = true
+      insightRefreshCount.current += 1
+      const nonce = `${Date.now().toString(36)}_${insightRefreshCount.current}`
+      setInsightLoading(true)
+      setInsightError(null)
+      if (opts?.forceOpen) setInsightOpen(true)
+      try {
+        const result = await fetchOpportunityInsight(detail, {
+          recentVisits,
+          refreshNonce: nonce,
+        })
+        setInsight(result)
+        setInsightOpen(true)
+        setActionsExpanded(false)
+      } catch {
+        setInsightError('洞察刷新失败，请重试')
+      } finally {
+        insightLoadingRef.current = false
+        setInsightLoading(false)
+      }
+    },
+    [detail, recentVisits],
+  )
+
+  async function handleInsightToggle() {
+    if (insightOpen) {
+      setInsightOpen(false)
+      return
+    }
+    if (insight) {
+      setInsightOpen(true)
+      return
+    }
+    await loadInsight({ forceOpen: true })
+  }
+
+  async function handleInsightRefresh(e?: ReactMouseEvent) {
+    e?.stopPropagation()
+    if (insightLoading) return
+    await loadInsight({ forceOpen: true })
+  }
+
+  function scrollToContacts() {
+    contactsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    setInfoOpen(true)
+  }
+
+  async function copyInsightAction(action: InsightAction) {
+    const lines = [
+      action.title,
+      action.description,
+      action.contactName || action.ownerName
+        ? `负责人：${action.contactName || action.ownerName}`
+        : '',
+      action.dueLabel ? `建议完成：${action.dueLabel}` : '',
+      action.source ? `依据：${formatActionSource(action.source)}` : '',
+    ].filter(Boolean)
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'))
+      setCopiedActionId(action.id)
+      window.setTimeout(() => {
+        setCopiedActionId((cur) => (cur === action.id ? null : cur))
+      }, 1600)
+    } catch {
+      /* clipboard may be unavailable */
+    }
+  }
+
+  function askCopilotAbout(action: InsightAction) {
+    if (!detail) return
+    const prompt = `关于商机「${detail.name}」（${detail.accountName}），请协助：${action.title}。${
+      action.description ? `目标：${action.description}` : ''
+    }`
+    onAskCopilot?.(prompt.trim())
+  }
 
   const stageIdx = useMemo(() => {
     if (!detail) return 0
@@ -217,6 +344,18 @@ export function OpportunityDetailScreen({
   const displayName = detail.name.includes(detail.accountName)
     ? detail.name.replace(`${detail.accountName} · `, '').replace(`${detail.accountName}·`, '').trim()
     : detail.name
+
+  const insightUpdatedLabel = insight ? formatInsightUpdatedAt(insight.updatedAt) : ''
+  const insightCrmAsOf = insight ? formatCrmAsOf(insight.evidence.crmUpdatedAt) : ''
+  const visibleInsightActions = insight
+    ? actionsExpanded
+      ? insight.actions
+      : insight.actions.slice(0, ACTIONS_PREVIEW)
+    : []
+  const hiddenInsightActionCount = insight
+    ? Math.max(0, insight.actions.length - ACTIONS_PREVIEW)
+    : 0
+  const visibleInsightPending = insight?.pendingChecks.slice(0, PENDING_PREVIEW) ?? []
 
   return (
     <section className="opp-detail" aria-label="商机详情">
@@ -461,7 +600,7 @@ export function OpportunityDetailScreen({
             </button>
           </div>
         ) : (
-          <ul className="opp-detail__contacts">
+          <ul className="opp-detail__contacts" ref={contactsRef}>
             {detail.contacts.map((c) => (
               <li key={c.id}>
                 <span className="opp-detail__contact-icon" aria-hidden>
@@ -582,42 +721,231 @@ export function OpportunityDetailScreen({
         ) : null}
       </section>
 
-      <section className="opp-detail__section">
-        <button
-          type="button"
-          className="opp-detail__fold"
-          aria-expanded={insightsOpen}
-          onClick={() => setInsightsOpen((v) => !v)}
+      <article
+        className={`activity-detail__ai opp-detail__ai${
+          insightOpen && (insight || insightLoading) ? ' is-expanded' : ''
+        }${insightLoading ? ' is-loading' : ''}`}
+      >
+        <div className="activity-detail__ai-toolbar">
+          <button
+            type="button"
+            className="activity-detail__ai-trigger"
+            aria-expanded={insightOpen}
+            aria-controls={insightPanelId}
+            aria-label={insightOpen ? '收起 AI 洞察' : '展开 AI 洞察'}
+            title={insightOpen ? '收起 AI 洞察' : '展开 AI 洞察'}
+            onClick={() => void handleInsightToggle()}
+          >
+            <span className="activity-detail__ai-icon" aria-hidden>
+              <IconSpark />
+            </span>
+            <span className="activity-detail__ai-copy">
+              <span className="activity-detail__ai-title-row">
+                <strong>AI 洞察</strong>
+                <span className="activity-detail__ai-badge">AI 建议</span>
+              </span>
+              <span className="activity-detail__ai-hint">
+                基于商机阶段、缺口字段和近期拜访生成
+              </span>
+              {insight && insightUpdatedLabel ? (
+                <span className="activity-detail__ai-time">{insightUpdatedLabel}</span>
+              ) : null}
+            </span>
+          </button>
+          <div className="activity-detail__ai-actions">
+            <IconButton
+              variant="soft"
+              size="sm"
+              squared
+              aria-label="刷新洞察"
+              title="刷新洞察：重新读取最新数据并分析"
+              disabled={insightLoading}
+              onClick={(e) => void handleInsightRefresh(e)}
+            >
+              <IconRefresh className={insightLoading ? 'is-spinning' : undefined} />
+            </IconButton>
+            <IconButton
+              variant="soft"
+              size="sm"
+              squared
+              aria-label={insightOpen ? '收起洞察' : '展开洞察'}
+              title={insightOpen ? '收起洞察' : '展开洞察'}
+              onClick={() => void handleInsightToggle()}
+            >
+              {insightOpen ? <IconChevronUp /> : <IconChevronDown />}
+            </IconButton>
+          </div>
+        </div>
+
+        <div
+          id={insightPanelId}
+          className="activity-detail__ai-panel"
+          hidden={!insightOpen}
+          aria-busy={insightLoading}
         >
-          <h2>AI 洞察</h2>
-          <span>{insightsOpen ? '收起' : '展开'}</span>
-        </button>
-        {insightsOpen ? (
-          detail.aiInsights.length === 0 ? (
-            <p className="muted">暂无 AI 洞察。</p>
-          ) : (
-            <ul className="opp-detail__insights">
-              {detail.aiInsights.map((ins) => (
-                <li key={ins.id}>
-                  <div className="opp-detail__insight-head">
-                    <IconSpark />
-                    <strong>{ins.sourceLabel}</strong>
-                    {ins.needsReview ? (
-                      <span className="opp-detail__pill opp-detail__pill--draft">待人工核实</span>
-                    ) : null}
-                  </div>
-                  <p>{ins.suggestion}</p>
-                  <p className="muted">
-                    依据：{ins.basis} · 更新 {formatDateTime(ins.updatedAt)}
-                    {ins.confidence < 0.7 ? ` · 提取置信 ${(ins.confidence * 100).toFixed(0)}%（≠赢单概率）` : ''}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )
-        ) : null}
-        <p className="muted opp-detail__ai-note">AI 建议不会自动改写正式商机字段。</p>
-      </section>
+          {insightLoading && !insight ? (
+            <p className="activity-detail__ai-status">正在结合阶段缺口与近期拜访生成洞察…</p>
+          ) : null}
+
+          {insightError ? (
+            <div className="activity-detail__ai-error-row" role="alert">
+              <p className="activity-detail__ai-error">{insightError}</p>
+              <button
+                type="button"
+                className="activity-detail__ai-retry"
+                onClick={() => void handleInsightRefresh()}
+                disabled={insightLoading}
+              >
+                重试
+              </button>
+            </div>
+          ) : null}
+
+          {insight ? (
+            <div className="activity-detail__ai-body">
+              {insightLoading ? (
+                <p className="activity-detail__ai-status">正在刷新分析…</p>
+              ) : null}
+
+              <section className="activity-insight__section" aria-labelledby={`${insightPanelId}-summary`}>
+                <h4 id={`${insightPanelId}-summary`} className="activity-insight__heading">
+                  商机结论
+                </h4>
+                <p className="activity-insight__summary">{insight.summary}</p>
+              </section>
+
+              {insight.signals.length > 0 ? (
+                <section className="activity-insight__section" aria-label="关键信号">
+                  <ul className="activity-insight__signals">
+                    {insight.signals.map((signal) => (
+                      <li
+                        key={signal.id}
+                        className={`activity-insight__signal is-${signalToneClass(signal.tone)}`}
+                      >
+                        <span className="activity-insight__signal-label">{signal.label}</span>
+                        <span className="activity-insight__signal-value">{signal.value}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+
+              {visibleInsightPending.length > 0 ? (
+                <section className="activity-insight__section" aria-labelledby={`${insightPanelId}-pending`}>
+                  <h4 id={`${insightPanelId}-pending`} className="activity-insight__heading">
+                    待核实
+                  </h4>
+                  <ul className="activity-insight__pending">
+                    {visibleInsightPending.map((check) => (
+                      <li key={check.id}>{check.text}</li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+
+              {insight.actions.length > 0 ? (
+                <section className="activity-insight__section" aria-labelledby={`${insightPanelId}-actions`}>
+                  <h4 id={`${insightPanelId}-actions`} className="activity-insight__heading">
+                    下一步行动
+                  </h4>
+                  <ul className="activity-insight__actions">
+                    {visibleInsightActions.map((action) => (
+                      <li key={action.id} className="activity-insight__action">
+                        <div className="activity-insight__action-main">
+                          <div className="activity-insight__action-top">
+                            <strong className="activity-insight__action-title">{action.title}</strong>
+                            <span className={`activity-insight__priority is-${action.priority}`}>
+                              {PRIORITY_LABEL[action.priority]}
+                            </span>
+                          </div>
+                          {action.description ? (
+                            <p className="activity-insight__action-desc">{action.description}</p>
+                          ) : null}
+                          <p className="activity-insight__action-meta">
+                            {action.contactName || action.ownerName
+                              ? `负责人：${action.contactName || action.ownerName}`
+                              : null}
+                            {(action.contactName || action.ownerName) && action.dueLabel ? ' · ' : null}
+                            {action.dueLabel ? action.dueLabel : null}
+                          </p>
+                          {action.source ? (
+                            <p className="activity-insight__action-source">
+                              依据：{formatActionSource(action.source)}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="activity-insight__action-ops">
+                          <button
+                            type="button"
+                            className="activity-insight__op"
+                            onClick={() => void copyInsightAction(action)}
+                          >
+                            {copiedActionId === action.id ? '已复制' : '复制建议'}
+                          </button>
+                          {(action.contactName || detail.contacts[0]) && (
+                            <button
+                              type="button"
+                              className="activity-insight__op"
+                              onClick={scrollToContacts}
+                            >
+                              查看联系人
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className={`activity-insight__op is-accent${
+                              addedTaskIds.has(action.id) ? ' is-done' : ''
+                            }`}
+                            onClick={() => setTaskAction(action)}
+                            title="选择日期并添加到任务"
+                            aria-label={
+                              addedTaskIds.has(action.id)
+                                ? '已添加，可再次选择日期添加'
+                                : '添加到任务'
+                            }
+                          >
+                            {addedTaskIds.has(action.id) ? '已添加' : '添加到任务'}
+                          </button>
+                          {onAskCopilot ? (
+                            <button
+                              type="button"
+                              className="activity-insight__op"
+                              onClick={() => askCopilotAbout(action)}
+                            >
+                              询问 Copilot
+                            </button>
+                          ) : null}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  {hiddenInsightActionCount > 0 ? (
+                    <button
+                      type="button"
+                      className="activity-insight__more"
+                      onClick={() => setActionsExpanded((v) => !v)}
+                      aria-expanded={actionsExpanded}
+                    >
+                      {actionsExpanded ? '收起' : `查看全部（${insight.actions.length}）`}
+                    </button>
+                  ) : null}
+                </section>
+              ) : null}
+
+              <p className="activity-insight__evidence">
+                依据：本商机
+                {` · 待补字段 ${insight.evidence.missingFieldCount}`}
+                {` · 近期拜访 ${insight.evidence.recentVisitCount}`}
+                {insightCrmAsOf ? ` · ${insightCrmAsOf}` : ''}
+                <span className="activity-insight__disclaimer">
+                  {' '}
+                  · 以上含 AI 建议，非正式 CRM 事实，请人工核实；不会自动改写正式商机字段
+                </span>
+              </p>
+            </div>
+          ) : null}
+        </div>
+      </article>
 
       <section className="opp-detail__section">
         <button
@@ -743,6 +1071,42 @@ export function OpportunityDetailScreen({
           </div>
         </div>
       ) : null}
+
+      <AddInsightTaskSheet
+        open={Boolean(taskAction)}
+        action={taskAction}
+        activityId={detail.id}
+        activityTitle={detail.name}
+        orgName={detail.accountName}
+        onClose={() => setTaskAction(null)}
+        onAdded={({ actionId }) => {
+          setAddedTaskIds((prev) => {
+            const next = new Set(prev)
+            next.add(actionId)
+            return next
+          })
+        }}
+      />
     </section>
   )
+}
+
+function signalToneClass(tone: InsightSignalTone) {
+  if (tone === 'positive') return 'positive'
+  if (tone === 'pending') return 'pending'
+  if (tone === 'risk') return 'risk'
+  if (tone === 'ai') return 'ai'
+  return 'neutral'
+}
+
+function formatActionSource(source: string) {
+  const map: Record<string, string> = {
+    activity_notes: '活动备注',
+    activity: '活动记录',
+    opportunity: '本商机',
+    visit: '近期拜访',
+    crm: 'CRM 记录',
+    missing_crm_field: '缺失 CRM 字段',
+  }
+  return map[source] || source
 }

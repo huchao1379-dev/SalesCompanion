@@ -32,6 +32,7 @@ import {
   discardDraft,
   upsertDraft,
 } from '../../data/dataverse'
+import { canConfirmDraft } from '../../data/syncStatus'
 import {
   enqueueOfflineUtterance,
   isOnline,
@@ -614,6 +615,14 @@ export function ActivityCapture({
     }, 500)
   }
 
+  function syncContentAreaHeight() {
+    const el = contentAreaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    const maxPx = Math.min(window.innerHeight * 0.5, 22 * 16)
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 9 * 16), maxPx)}px`
+  }
+
   function handleContentChange(value: string) {
     setTranscriptEdit(value)
     speech.setTranscript(value)
@@ -622,7 +631,13 @@ export function ActivityCapture({
       setPhase('transcript_ready')
       scheduleAutoSave(value)
     }
+    window.requestAnimationFrame(syncContentAreaHeight)
   }
+
+  useEffect(() => {
+    if (isRecordingSession) return
+    window.requestAnimationFrame(syncContentAreaHeight)
+  }, [transcriptEdit, isRecordingSession, stepIndex])
 
   function updateDraft(next: DraftPayload) {
     setDrafts((prev) => prev.map((d) => (d.idempotencyKey === next.idempotencyKey ? next : d)))
@@ -630,6 +645,11 @@ export function ActivityCapture({
   }
 
   async function handleConfirm(draft: DraftPayload) {
+    if (!canConfirmDraft(draft)) {
+      setPhase('transcript_ready')
+      setStatusDetail('督导存在阻断项，请先补全必填信息后再确认同步。')
+      return
+    }
     setPhase('submitting')
     setStatusDetail(`正在同步「${draft.kind === 'opportunity' ? '商机' : '拜访'}」…`)
     try {
@@ -657,8 +677,13 @@ export function ActivityCapture({
   }
 
   async function handleConfirmAll() {
-    const pending = drafts.filter((d) => d.syncStatus === 'Draft')
-    if (!pending.length) return
+    const pending = drafts.filter((d) => canConfirmDraft(d))
+    if (!pending.length) {
+      if (drafts.some((d) => d.syncStatus === 'Draft' && d.reviewStatus === 'blocked')) {
+        setStatusDetail('督导存在阻断项，请先补全必填信息后再确认同步。')
+      }
+      return
+    }
     setPhase('submitting')
     let anyFail = false
     let anyMock = false
@@ -937,12 +962,13 @@ export function ActivityCapture({
             <textarea
               ref={contentAreaRef}
               className="capture-screen__content-input"
-              rows={5}
-              aria-label="转写内容"
-              placeholder="点击此处直接修改转写内容，或下方开始录音…"
+              rows={4}
+              aria-label="拜访内容"
+              placeholder="点击此处直接修改拜访内容，或下方开始录音…"
               value={transcriptEdit}
               disabled={phase === 'processing' || phase === 'submitting'}
               onChange={(e) => handleContentChange(e.target.value)}
+              onFocus={syncContentAreaHeight}
               onBlur={() => {
                 if (transcriptEdit.trim()) persistTranscript(transcriptEdit, { quiet: true })
               }}

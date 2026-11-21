@@ -299,6 +299,12 @@ function buildAccountPulseUi(
     seedish ? '种子演示数据，请核实是否为最新 CRM 状态' : '请以 CRM 实时数据为准',
   ].filter(Boolean)
 
+  const followUps = [
+    `查一下${account.name}上个订单的物流`,
+    `帮我写一封给${account.name}的跟进邮件`,
+    `刚拜访完${account.name}，帮我生成活动草稿`,
+  ]
+
   return {
     type: 'account_pulse',
     title: account.name,
@@ -314,6 +320,8 @@ function buildAccountPulseUi(
     originLabel: 'CRM 数据',
     footnote: footnoteParts.join(' · '),
     hint: normalizeSuggestion(suggestion),
+    followUps,
+    examples: followUps,
   }
 }
 
