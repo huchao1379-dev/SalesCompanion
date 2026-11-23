@@ -1,6 +1,13 @@
 import cors from 'cors'
 import express from 'express'
-import { config, hasDeepSeek, hasVisionModel } from './config.js'
+import {
+  activeLlmModelName,
+  config,
+  hasDeepSeek,
+  hasLlm,
+  hasOpenAI,
+  hasVisionModel,
+} from './config.js'
 import { apiRouter } from './routes/api.js'
 import { repository } from './store/dataverseStore.js'
 
@@ -20,7 +27,17 @@ app.use('/api', (req, res) => {
 app.listen(config.port, config.host, () => {
   console.log(`[SalesCompanion API] http://${config.host}:${config.port}`)
   console.log(`  AI provider: ${config.aiProvider}`)
-  console.log(`  DeepSeek: ${hasDeepSeek() ? 'ON (' + config.deepseekModel + ')' : 'OFF → heuristic fallback'}`)
+  if (config.aiProvider === 'openai') {
+    console.log(
+      `  OpenAI: ${hasOpenAI() ? 'ON (' + activeLlmModelName() + ')' : 'OFF → heuristic fallback'}`,
+    )
+  } else if (config.aiProvider === 'deepseek') {
+    console.log(
+      `  DeepSeek: ${hasDeepSeek() ? 'ON (' + config.deepseekModel + ')' : 'OFF → heuristic fallback'}`,
+    )
+  } else {
+    console.log(`  LLM chat: ${hasLlm() ? 'ON (' + activeLlmModelName() + ')' : 'OFF'}`)
+  }
   console.log(
     `  Vision: ${hasVisionModel() ? 'ON (' + config.visionModel + ')' : 'OFF → image attachments text-only notice'}`,
   )

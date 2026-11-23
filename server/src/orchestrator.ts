@@ -1,4 +1,4 @@
-import { config, hasDeepSeek } from './config.js'
+import { activeLlmModelName, config, hasLlm } from './config.js'
 import {
   mergeUtteranceWithAttachments,
   understandAttachments,
@@ -7,11 +7,13 @@ import { buildClarifyReply } from './agents/clarify.js'
 import { classifyIntent } from './agents/intent.js'
 import { ensureAgentsRegistered } from './agents/catalog.js'
 import { requireAgent } from './agents/registry.js'
+import { resolvePipeline } from './agents/pipelines.js'
+import { composeQueryAccountMessages } from './agents/compose.js'
+import { promptVersion } from './agents/prompts/index.js'
 import type {
   AgentContext,
   AgentResult,
   ConversationTurn,
-  PipelineDef,
   PipelineState,
 } from './agents/agentTypes.js'
 import { repository } from './store/dataverseStore.js'
@@ -27,47 +29,17 @@ import type {
   SourceRef,
 } from './types.js'
 
-/**
- * Intent → collaboration mode + agent chain.
- * Add agents in catalog.ts, then list them here (or use intents[] for single-route).
- */
-const PIPELINES: Partial<Record<Intent, PipelineDef>> = {
-  /**
-   * Visit path: extract → draft → supervise.
-   * Account resolve is folded into ActivityCreate (no separate AccountProfile hop),
-   * which cuts one sequential step without losing seed matching.
-   */
-  capture_visit: {
-    mode: 'sequential',
-    agents: ['EntityExtract', 'ActivityCreate', 'OpportunityCreate', 'OpportunitySupervisor'],
-  },
-  query_account: {
-    mode: 'fanout',
-    agents: ['AccountProfile', 'OpportunityPulse'],
-  },
-  query_order: {
-    mode: 'single',
-    agents: ['OrderQuery'],
-  },
-  work_summary: {
-    mode: 'single',
-    agents: ['WorkSummary'],
-  },
-  general_assist: {
-    mode: 'single',
-    agents: ['GeneralAssist'],
-  },
-}
-
 const AGENT_IDS: Record<string, string> = {
   Orchestrator: 'Orchestrator',
   销售Copilot: 'Orchestrator',
   实体抽取: 'EntityExtract',
   客户画像Agent: 'AccountProfile',
+  客户列表Agent: 'AccountList',
   商机速览Agent: 'OpportunityPulse',
   活动创建Agent: 'ActivityCreate',
   商机创建Agent: 'OpportunityCreate',
   商机督导Agent: 'OpportunitySupervisor',
+  活动督导Agent: 'ActivitySupervisor',
   订单查询Agent: 'OrderQuery',
   工作总结Agent: 'WorkSummary',
   通用助手: 'GeneralAssist',
@@ -136,14 +108,21 @@ async function runAgentWithLog(
     const confidence =
       result.messages?.find((message) => message.confidence > 0)?.confidence ??
       result.drafts?.[0]?.confidence
-    const status = result.mode === 'heuristic' && hasDeepSeek() ? 'fallback' : 'ok'
+    const status = result.mode === 'heuristic' && hasLlm() ? 'fallback' : 'ok'
+    const fallbackReason =
+      status === 'fallback'
+        ? result.fallbackReason || 'agent returned heuristic output'
+        : undefined
     steps.push({
       agentId: agent.name,
       agentName: agent.displayName,
       status,
       latencyMs,
-      summary: result.messages?.[0]?.content.slice(0, 120) ||
+      summary:
+        (fallbackReason ? `降级：${fallbackReason}` : undefined) ||
+        result.messages?.[0]?.content.slice(0, 120) ||
         (result.drafts?.length ? `生成 ${result.drafts.length} 条草稿` : undefined),
+      errorCode: fallbackReason ? fallbackReason.slice(0, 120) : undefined,
     })
     await safeLog({
       sessionId: ctx.sessionKey,
@@ -154,13 +133,16 @@ async function runAgentWithLog(
         messages: result.messages?.length ?? 0,
         drafts: result.drafts?.map((draft) => draft.idempotencyKey) ?? [],
         review: result.review?.length ?? 0,
+        fallbackReason: fallbackReason || undefined,
       }),
       latencyMs,
       success: true,
       confidence,
-      promptVersion: config.promptVersion,
-      modelName: hasDeepSeek() ? config.deepseekModel : 'heuristic',
-      fallbackReason: status === 'fallback' ? 'agent returned heuristic output' : undefined,
+      promptVersion: promptVersion(agent.name) || config.promptVersion,
+      modelName: hasLlm() ? activeLlmModelName() : 'heuristic',
+      fallbackReason,
+      errorMessage: fallbackReason,
+      errorCode: fallbackReason ? 'AGENT_FALLBACK' : undefined,
     })
     if (result.mode) ctx.modes.add(result.mode)
     return result
@@ -181,8 +163,8 @@ async function runAgentWithLog(
       success: false,
       errorMessage: error instanceof Error ? error.message : 'unknown',
       errorCode: 'AGENT_FAILED',
-      promptVersion: config.promptVersion,
-      modelName: hasDeepSeek() ? config.deepseekModel : 'heuristic',
+      promptVersion: promptVersion(agent.name) || config.promptVersion,
+      modelName: hasLlm() ? activeLlmModelName() : 'heuristic',
     })
     throw error
   }
@@ -309,7 +291,13 @@ function synthesizeVisitComposite(ctx: AgentContext): AgentMessage[] {
   const { account, opportunity, activity, extracted } = ctx.state
   if (!activity && !opportunity) return []
 
-  const chain = ['EntityExtract', 'ActivityCreate', 'OpportunityCreate', 'OpportunitySupervisor']
+  const chain = [
+    'EntityExtract',
+    'ActivityCreate',
+    'OpportunityCreate',
+    'ActivitySupervisor',
+    'OpportunitySupervisor',
+  ]
   const product = [extracted?.productLine, extracted?.productModel].filter(Boolean).join(' ')
   const qty = extracted?.quantity ? `${extracted.quantity} 台` : ''
   const contact = extracted?.contactName || activity?.contactName
@@ -447,12 +435,21 @@ function normalizeMessage(message: AgentMessage, fallbackAgentId = 'Orchestrator
       : agentId === 'Orchestrator'
         ? 'composite'
         : 'answer')
+  const sources = message.sources?.length
+    ? message.sources
+    : message.role === 'assistant' && !message.draft
+      ? [{ kind: 'other' as const, label: '无来源', ref: 'none' }]
+      : message.sources || []
+  const adjustedConfidence =
+    sources.length === 1 && sources[0]?.ref === 'none'
+      ? Math.min(confidence, 0.45)
+      : confidence
   return {
     ...message,
     agent_id: agentId,
-    confidence,
+    confidence: adjustedConfidence,
     confidence_kind: confidenceKind,
-    sources: message.sources || [],
+    sources,
   }
 }
 
@@ -476,7 +473,7 @@ async function buildContext(req: OrchestratorRequest, intent: Intent, history: C
       name: account.name,
       aliases: AGENT_ALIASES[account.name] || [account.externalKey.split(/[-_]/).at(-1) || ''],
     })),
-    modes: new Set<'deepseek' | 'heuristic'>(),
+    modes: new Set<'deepseek' | 'openai' | 'heuristic'>(),
   }
   return ctx
 }
@@ -520,6 +517,7 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
   const enrichedReq: OrchestratorRequest = { ...req, utterance: effectiveUtterance }
 
   const intentStarted = performance.now()
+  // IntentRouter is skill-catalog + LLM first; hardMatch / memory refine live inside classifyIntent.
   const intentResult = await classifyIntent(effectiveUtterance, {
     history,
     memory,
@@ -528,24 +526,7 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
       aliases: AGENT_ALIASES[account.name] || [],
     })),
   })
-  let intent = intentResult.intent
-  if (
-    intent === 'clarify' &&
-    memory.accountId &&
-    !/你能做|能做什么|有什么功能|怎么用|你好|嗨|hello|hi/i.test(effectiveUtterance) &&
-    /那|它|这个|这家|刚才|这单|那单/.test(effectiveUtterance)
-  ) {
-    intent = 'query_account'
-  }
-  // Pronoun follow-ups with remembered account → prefer account query over vague clarify.
-  if (
-    intent === 'clarify' &&
-    memory.accountId &&
-    intentResult.focus === 'ambiguous' &&
-    /最近|怎么样|进度|信用|商机|画像/.test(effectiveUtterance)
-  ) {
-    intent = 'query_account'
-  }
+  const intent = intentResult.intent
 
   const ctx = await buildContext(enrichedReq, intent, history, memory)
   ctx.modes.add(intentResult.mode)
@@ -562,9 +543,12 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
   steps.push({
     agentId: 'IntentRouter',
     agentName: '意图路由',
-    status: intentResult.mode === 'heuristic' && hasDeepSeek() ? 'fallback' : 'ok',
+    status: intentResult.mode === 'heuristic' && hasLlm() ? 'fallback' : 'ok',
     latencyMs: Math.round(performance.now() - intentStarted),
-    summary: `${intentResult.intent} · ${(intentResult.confidence * 100).toFixed(0)}%`,
+    summary: intentResult.llmError
+      ? `降级：${intentResult.llmError}`
+      : `${intentResult.intent} · ${(intentResult.confidence * 100).toFixed(0)}%`,
+    errorCode: intentResult.llmError ? intentResult.llmError.slice(0, 120) : undefined,
   })
   await safeLog({
     sessionId: sessionKey,
@@ -575,7 +559,10 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
     success: true,
     confidence: intentResult.confidence,
     promptVersion: config.promptVersion,
-    modelName: hasDeepSeek() ? config.deepseekModel : 'heuristic',
+    modelName: hasLlm() ? activeLlmModelName() : 'heuristic',
+    fallbackReason: intentResult.llmError,
+    errorMessage: intentResult.llmError,
+    errorCode: intentResult.llmError ? 'LLM_FALLBACK' : undefined,
   })
 
   let messages: AgentMessage[] = []
@@ -614,23 +601,34 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
     steps.push({
       agentId: 'Clarify',
       agentName: '澄清 Agent',
-      status: clarify.mode === 'heuristic' && hasDeepSeek() ? 'fallback' : 'ok',
+      status: clarify.mode === 'heuristic' && hasLlm() ? 'fallback' : 'ok',
       latencyMs: Math.round(performance.now() - clarifyStarted),
-      summary: clarify.message.content.slice(0, 80),
+      summary: clarify.llmError
+        ? `降级：${clarify.llmError}`
+        : clarify.message.content.slice(0, 80),
+      errorCode: clarify.llmError ? clarify.llmError.slice(0, 120) : undefined,
     })
     await safeLog({
       sessionId: sessionKey,
       agentName: 'Clarify',
       inputSummary: utterance.slice(0, 500),
-      outputEnvelope: JSON.stringify({ intent, focus: intentResult.focus, missingSlots: intentResult.missingSlots }),
+      outputEnvelope: JSON.stringify({
+        intent,
+        focus: intentResult.focus,
+        missingSlots: intentResult.missingSlots,
+        llmError: clarify.llmError,
+      }),
       latencyMs: steps[steps.length - 1].latencyMs,
       success: true,
       confidence: clarify.message.confidence,
       promptVersion: config.promptVersion,
-      modelName: hasDeepSeek() ? config.deepseekModel : 'heuristic',
+      modelName: hasLlm() ? activeLlmModelName() : 'heuristic',
+      fallbackReason: clarify.llmError,
+      errorMessage: clarify.llmError,
+      errorCode: clarify.llmError ? 'LLM_FALLBACK' : undefined,
     })
   } else {
-    const pipeline = PIPELINES[intent]
+    const pipeline = resolvePipeline(intent)
     if (!pipeline || pipeline.agents.length === 0) {
       messages = [errorMessage(intent, new Error('无可用流水线'))]
     } else {
@@ -644,7 +642,28 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
           const composite = synthesizeVisitComposite(ctx)
           messages = composite.length ? composite : bag.messages
         } else if (intent === 'query_account') {
-          messages = enrichAccountFollowUps(bag.messages, ctx)
+          const composed = await composeQueryAccountMessages(bag.messages, ctx)
+          ctx.modes.add(composed.mode)
+          steps.push({
+            agentId: 'Compose',
+            agentName: '回复合成',
+            status: composed.mode === 'heuristic' && hasLlm() ? 'fallback' : 'ok',
+            latencyMs: 0,
+            summary: composed.messages[0]?.content.slice(0, 80),
+          })
+          await safeLog({
+            sessionId: sessionKey,
+            agentName: 'Compose',
+            inputSummary: utterance.slice(0, 500),
+            outputEnvelope: JSON.stringify({ overview: composed.messages[0]?.content }),
+            latencyMs: 0,
+            success: true,
+            confidence: composed.messages[0]?.confidence,
+            promptVersion: composed.promptVersion,
+            modelName:
+              composed.mode === 'heuristic' ? 'heuristic' : activeLlmModelName(),
+          })
+          messages = enrichAccountFollowUps(composed.messages, ctx)
         } else {
           messages = bag.messages
         }
@@ -702,18 +721,27 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
 
   const latencyMs = Math.round(performance.now() - startedAt)
   const modes = ctx.modes
-  const mode: OrchestratorResponse['mode'] = !hasDeepSeek()
+  const usedLlm = modes.has('deepseek') || modes.has('openai')
+  const mode: OrchestratorResponse['mode'] = !hasLlm()
     ? 'heuristic'
-    : modes.has('deepseek') && modes.has('heuristic')
+    : usedLlm && modes.has('heuristic')
       ? 'mixed'
       : modes.has('heuristic')
         ? 'heuristic'
-        : 'deepseek'
+        : modes.has('openai')
+          ? 'openai'
+          : 'deepseek'
   const fallbackSteps = steps.filter((step) => step.status === 'fallback' || step.status === 'error')
+  const llmFailureDetail = [
+    intentResult.llmError,
+    ...fallbackSteps.map((step) => step.errorCode).filter(Boolean),
+  ].find((text) => Boolean(text && /连接|超时|不可达|HTTP|OpenAI|DeepSeek|网关|代理/.test(text)))
   const degradedParts = [
-    fallbackSteps.length
-      ? `部分步骤降级：${fallbackSteps.map((step) => step.agentName).join('、')}`
-      : '',
+    llmFailureDetail
+      ? `模型调用失败已规则兜底：${llmFailureDetail}`
+      : fallbackSteps.length
+        ? `部分步骤降级：${fallbackSteps.map((step) => step.agentName).join('、')}`
+        : '',
     attachmentUnderstanding.visionDegraded
       ? '部分图片未能视觉识别（未配置 VISION_MODEL 或识别失败），已按文件名/文字说明继续。'
       : '',
@@ -726,7 +754,7 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
     inputSummary: utterance.slice(0, 500),
     outputEnvelope: JSON.stringify({
       intent,
-      pipeline: PIPELINES[intent]?.agents ?? [],
+      pipeline: resolvePipeline(intent)?.agents ?? [],
       drafts: drafts.length,
       messages: messages.length,
       steps: steps.map((step) => `${step.agentId}:${step.status}`),
@@ -738,7 +766,7 @@ export async function orchestrate(req: OrchestratorRequest): Promise<Orchestrato
     errorMessage: pipelineError instanceof Error ? pipelineError.message : undefined,
     errorCode: pipelineError ? 'PIPELINE_FAILED' : undefined,
     promptVersion: config.promptVersion,
-    modelName: hasDeepSeek() ? config.deepseekModel : 'heuristic',
+    modelName: hasLlm() ? activeLlmModelName() : 'heuristic',
     fallbackReason: degradedReason,
   })
 

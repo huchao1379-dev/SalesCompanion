@@ -1,3 +1,17 @@
+export type {
+  SourceRef,
+  SourceKind,
+  ConfidenceKind,
+  ReviewSeverity,
+  ReviewAction,
+  ReviewFinding,
+  AgentStepStatus,
+  AgentStep,
+  AgentRole,
+  EnvelopeCore,
+} from './shared/envelope.js'
+export { ENVELOPE_REQUIRED_KEYS } from './shared/envelope.js'
+
 export type SyncStatus =
   | 'Draft'
   | 'Confirmed'
@@ -6,38 +20,13 @@ export type SyncStatus =
   | 'SyncFailed'
   | 'Discarded'
 
-export type SourceRef = {
-  kind: 'dataverse' | 'sap' | 'knowledge' | 'other'
-  label: string
-  ref?: string
-  entity?: string
-  id?: string
-}
-
-export type ConfidenceKind = 'answer' | 'extraction' | 'composite'
-
-export type ReviewSeverity = 'info' | 'warn' | 'block'
-
-export type ReviewAction = 'create' | 'link_existing' | 'update_stage' | 'edit'
-
-export type ReviewFinding = {
-  code: string
-  severity: ReviewSeverity
-  field?: string
-  message: string
-  suggestedAction?: ReviewAction
-}
-
-export type AgentStepStatus = 'ok' | 'fallback' | 'error' | 'skipped'
-
-export type AgentStep = {
-  agentId: string
-  agentName: string
-  status: AgentStepStatus
-  latencyMs: number
-  summary?: string
-  errorCode?: string
-}
+import type {
+  SourceRef,
+  ConfidenceKind,
+  ReviewFinding,
+  ReviewAction,
+  AgentStep,
+} from './shared/envelope.js'
 
 export type ActivityDraft = {
   kind: 'activity'
@@ -215,7 +204,7 @@ export type OrchestratorResponse = {
   context: Record<string, string>
   latencyMs: number
   intent?: string
-  mode?: 'deepseek' | 'heuristic' | 'mixed' | 'copilotstudio'
+  mode?: 'deepseek' | 'openai' | 'heuristic' | 'mixed' | 'copilotstudio'
   degraded_reason?: string
   steps?: AgentStep[]
 }
@@ -335,6 +324,7 @@ export type ExtractedVisit = {
 export type Intent =
   | 'capture_visit'
   | 'query_account'
+  | 'list_accounts'
   | 'query_order'
   | 'work_summary'
   | 'general_assist'

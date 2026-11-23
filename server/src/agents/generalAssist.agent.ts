@@ -3,7 +3,14 @@
  */
 import type { DomainAgent } from './agentTypes.js'
 import type { AgentMessage, MessageUiBlock, SourceRef } from '../types.js'
-import { chatStructured, chatWithTools, hasDeepSeek } from '../llm/deepseek.js'
+import {
+  chatStructured,
+  chatWithTools,
+  hasLlm,
+  llmSuccessMode,
+  parseStructuredJson,
+} from '../llm/deepseek.js'
+import type { LlmSuccessMode } from '../llm/types.js'
 import { generalAssistOutputSchema } from '../llm/schemas.js'
 import { GENERAL_ASSIST_SYSTEM, GENERAL_ASSIST_TOOL_ADDENDUM } from './prompts.js'
 import { generalAssistTools } from '../tools/webTools.js'
@@ -14,17 +21,92 @@ function uid(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`
 }
 
-function parseAssistJson(raw: string) {
-  const trimmed = raw.trim()
-  const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  const body = fence?.[1]?.trim() || trimmed
-  const start = body.indexOf('{')
-  const end = body.lastIndexOf('}')
-  if (start < 0 || end <= start) throw new Error('No JSON object in model output')
-  return generalAssistOutputSchema.parse(JSON.parse(body.slice(start, end + 1)))
+/** Parse model JSON with lenient repair (fences / trailing commas / unescaped quotes). */
+export function parseAssistJson(raw: string) {
+  return parseStructuredJson(raw, generalAssistOutputSchema)
 }
 
-function heuristicAssist(utterance: string, accountName?: string): {
+type GeneralAssistOutput = ReturnType<typeof parseAssistJson>
+
+/** Short, user/log-safe reason when LLM / tools / JSON parse fails. */
+export function formatGeneralAssistError(error: unknown): string {
+  if (!(error instanceof Error)) return 'unknown error'
+  const msg = error.message || error.name || 'unknown'
+  if (error.name === 'TimeoutError' || /aborted|timeout|TimeoutError/i.test(msg)) {
+    return 'LLM/工具请求超时'
+  }
+  if (/exceeded the tool-call round/i.test(msg)) return '工具调用轮次超限'
+  if (
+    /Expected ',' or ']'|Expected property name|Unexpected token|Unexpected end|JSON\.parse|No JSON object|position \d+/i.test(
+      msg,
+    )
+  ) {
+    return `模型输出 JSON 语法错误：${msg.slice(0, 80)}`
+  }
+  if (/invalid_type|ZodError|Zod/i.test(msg) || error.name === 'ZodError') {
+    return `模型输出校验失败：${msg.slice(0, 80)}`
+  }
+  if (
+    /DeepSeek HTTP|DEEPSEEK_UNAVAILABLE|OpenAI HTTP|OPENAI_UNAVAILABLE/i.test(msg)
+  ) {
+    return msg.slice(0, 100)
+  }
+  return msg.slice(0, 120)
+}
+
+function digestToolResults(
+  toolResults: Array<{ name: string; result: unknown }>,
+): Array<{ name: string; result: unknown }> {
+  return toolResults.slice(0, 6).map((item) => {
+    try {
+      const raw = JSON.stringify(item.result ?? null)
+      if (raw.length <= 2000) return { name: item.name, result: item.result }
+      return { name: item.name, result: `${raw.slice(0, 2000)}…` }
+    } catch {
+      return { name: item.name, result: String(item.result).slice(0, 500) }
+    }
+  })
+}
+
+/**
+ * Prefer local lenient parse; if still broken after tool-calling, one structured repair
+ * (json_object + schema) so we don't drop a good web search to the heuristic template.
+ */
+async function parseAssistJsonOrRepair(
+  raw: string,
+  payload: Record<string, unknown>,
+  toolResults: Array<{ name: string; result: unknown }>,
+): Promise<GeneralAssistOutput> {
+  try {
+    return parseAssistJson(raw)
+  } catch {
+    const { data } = await chatStructured({
+      system: `${GENERAL_ASSIST_SYSTEM}
+
+【修复模式】上一次输出不是合法 JSON（常见：字符串内未转义的引号/换行）。
+请根据用户问题与 toolResults 重新输出【一个】合法 JSON 对象；字符串内的双引号必须写成 \\"；不要 Markdown。`,
+      user: JSON.stringify({
+        ...payload,
+        toolResults: digestToolResults(toolResults),
+        brokenModelOutput: String(raw || '').slice(0, 6000),
+      }),
+      temperature: 0,
+      maxTokens: 900,
+      schema: generalAssistOutputSchema,
+    })
+    return data
+  }
+}
+
+function looksLikeHotTopicRequest(text: string) {
+  return /热点|热点话题|行业话题|时事|新闻|政策|集采|行情|趋势|话题/.test(text)
+}
+
+/** Offline / failure templates. Prefer specific topic matchers before loose「开场」. */
+export function heuristicAssist(
+  utterance: string,
+  accountName?: string,
+): {
   answer: string
   title: string
   sections: NonNullable<MessageUiBlock['sections']>
@@ -33,6 +115,52 @@ function heuristicAssist(utterance: string, accountName?: string): {
 } {
   const t = utterance.trim()
   const ctx = accountName ? `（当前对话客户：${accountName}）` : ''
+
+  // Hot topics / industry chatter — must win over bare「开场」in the same sentence.
+  if (looksLikeHotTopicRequest(t)) {
+    return {
+      title: '行业话题备忘',
+      answer: `当前无法实时拉取新闻，先给你 3 个可跟医院客户开场聊的方向框架${ctx}。请自行核实最新政策与数据后再用。`,
+      sections: [
+        {
+          heading: '说明',
+          bullets: [
+            {
+              text: '以下不是实时热点稿，而是销售开场可用的话题骨架；联网恢复后可再问一次以获取更新线索。',
+            },
+          ],
+        },
+        {
+          heading: '3 条可聊方向',
+          bullets: [
+            {
+              text: '集采与预算窗口：科室本年度采购/招标节点、国产替代与预算切分怎么影响选型节奏。',
+            },
+            {
+              text: '临床与运维痛点：报警疲劳、设备联网/数据互通、维保响应——用对方科室真实场景切入。',
+            },
+            {
+              text: '质量与合规：不良事件上报、等保/数据安全、院内信息化验收对监护设备的新要求。',
+            },
+          ],
+        },
+        {
+          heading: '建议',
+          bullets: [
+            {
+              text: '开场只抛一个方向 + 一个具体问题（例如「你们科今年集采目录有没有动监护」），再衔接到你的产品证据。',
+            },
+          ],
+        },
+      ],
+      followUps: [
+        '把第 1 条改成 30 秒开场白',
+        '对方说太贵怎么回',
+        '帮我写一封拜访后的跟进邮件',
+      ],
+      confidence: 0.58,
+    }
+  }
 
   if (/邮件|email|跟进信|感谢信/i.test(t)) {
     return {
@@ -64,7 +192,11 @@ function heuristicAssist(utterance: string, accountName?: string): {
     }
   }
 
-  if (/话术|怎么讲|卖点|开场|异议/i.test(t)) {
+  // Avoid bare「开场」— it collides with「开场聊热点」. Prefer explicit coaching cues.
+  if (
+    /话术|怎么讲|卖点|异议处理|开场话术|开场白|30\s*秒开场|一分钟开场/i.test(t) ||
+    (/异议/.test(t) && /价格|竞品|太贵/.test(t))
+  ) {
     return {
       title: '拜访话术要点',
       answer: `给你一套可用的沟通框架${ctx}。具体参数请以产品手册为准；客户信用/订单请改用「查客户」「查订单」。`,
@@ -116,9 +248,9 @@ function heuristicAssist(utterance: string, accountName?: string): {
 
   return {
     title: '通用助手',
-    answer: hasDeepSeekHint()
+    answer: hasLlm()
       ? `我可以帮你写话术/邮件、做会议准备，或（若已配置联网）检索公开网页。你刚才说的「${t.slice(0, 40)}${t.length > 40 ? '…' : ''}」我这边需要更明确一点：是要文案、准备清单，还是查公开资料？`
-      : `当前未配置 DeepSeek，我只能给通用销售框架。你可以试：写跟进邮件、N17 开场话术、Demo 议程；查 CRM 客户请用「仁济医院最近怎么样？」`,
+      : `当前未配置聊天模型（DeepSeek / OpenAI），我只能给通用销售框架。你可以试：写跟进邮件、N17 开场话术、Demo 议程；查 CRM 客户请用「仁济医院最近怎么样？」`,
     sections: [
       {
         heading: '建议',
@@ -137,10 +269,6 @@ function heuristicAssist(utterance: string, accountName?: string): {
   }
 }
 
-function hasDeepSeekHint() {
-  return hasDeepSeek()
-}
-
 function buildMessage(params: {
   answer: string
   title?: string
@@ -149,7 +277,7 @@ function buildMessage(params: {
   confidence: number
   sources: SourceRef[]
   usedWeb: boolean
-  mode: 'deepseek' | 'heuristic'
+  mode: LlmSuccessMode | 'heuristic'
 }): AgentMessage {
   const webOffNote = !hasWebSearch() && !hasWebFetch()
     ? '当前未配置 WEB_SEARCH_API_KEY，无法实时联网检索。'
@@ -196,7 +324,7 @@ export const generalAssistAgent: DomainAgent = {
     const webTools = generalAssistTools()
     const webEnabled = hasWebSearch() || hasWebFetch()
 
-    if (!hasDeepSeek()) {
+    if (!hasLlm()) {
       return {
         messages: [
           buildMessage({
@@ -207,6 +335,7 @@ export const generalAssistAgent: DomainAgent = {
           }),
         ],
         mode: 'heuristic',
+        fallbackReason: 'LLM 未配置（DeepSeek / OpenAI）',
       }
     }
 
@@ -232,15 +361,17 @@ export const generalAssistAgent: DomainAgent = {
 
     try {
       if (webTools.length > 0) {
-        const { finalText, toolResults } = await chatWithTools({
-          system: `${GENERAL_ASSIST_SYSTEM}\n\n${GENERAL_ASSIST_TOOL_ADDENDUM}`,
+        const { finalText, toolResults, mode: toolMode } = await chatWithTools({
+          system: `${GENERAL_ASSIST_SYSTEM}\n\n${GENERAL_ASSIST_TOOL_ADDENDUM}
+
+【输出】工具调用结束后，最终回复必须是单个合法 JSON 对象（不要 Markdown）。字符串内双引号请转义为 \\"。`,
           user: JSON.stringify(payload),
           tools: webTools,
           temperature: 0.4,
           maxTokens: 900,
           maxToolRounds: 3,
         })
-        const data = parseAssistJson(finalText)
+        const data = await parseAssistJsonOrRepair(finalText, payload, toolResults)
         const usedWeb =
           data.usedWeb === true ||
           toolResults.some((item) => {
@@ -272,6 +403,7 @@ export const generalAssistAgent: DomainAgent = {
             }
           }
         }
+        const mode = toolMode || llmSuccessMode()
         return {
           messages: [
             buildMessage({
@@ -282,10 +414,10 @@ export const generalAssistAgent: DomainAgent = {
               confidence: data.confidence ?? 0.75,
               sources: sources.slice(0, 6),
               usedWeb,
-              mode: 'deepseek',
+              mode,
             }),
           ],
-          mode: 'deepseek',
+          mode,
         }
       }
 
@@ -315,20 +447,23 @@ export const generalAssistAgent: DomainAgent = {
         ],
         mode,
       }
-    } catch {
+    } catch (error) {
+      const reason = formatGeneralAssistError(error)
+      const failNote = webEnabled
+        ? `（模型调用失败：${reason}；已回落模板，联网工具可能未使用。）`
+        : `（模型调用失败：${reason}；已回落模板。）`
       return {
         messages: [
           buildMessage({
             ...fallback,
-            answer: webEnabled
-              ? `${fallback.answer}\n\n（模型调用失败，已回落模板；联网工具可能未使用。）`
-              : fallback.answer,
+            answer: `${fallback.answer}\n\n${failNote}`,
             sources: [],
             usedWeb: false,
             mode: 'heuristic',
           }),
         ],
         mode: 'heuristic',
+        fallbackReason: reason,
       }
     }
   },

@@ -96,7 +96,7 @@
 | 项 | 结论 |
 | --- | --- |
 | DeepSeek API 客户端 | **必做** |
-| Dataverse Web API 仓储（读客户、写草稿） | **必做** |
+| Dataverse Web API 仓储（读客户、写草稿） | **后续轨**（Demo 验收以种子内存库为准；见 [19](19-agent-reply-ui-hardening.md)） |
 | 种子数据 3～5 家医院（含仁济 + N17 商机） | **必做** |
 | `synced` 状态模拟（无真实 SB） | **必做** |
 | 独立业务库（SQLite/Postgres 作 SoR） | **不做** |
@@ -123,16 +123,17 @@
 
 - [x] 无 Copilot Studio、无 AI Builder 即可跑通（`server/` 自研编排）  
 - [x] LLM **仅 DeepSeek**（无 Key 时启发式兜底，不引入其它模型）  
-- [x] 业务读写 **仅 Dataverse 语义存储**（内存种子 / 可选 Web API）  
+- [x] 业务读写 **仅 Dataverse 语义存储**（当前：内存种子；Web API 后续轨）  
 - [x] 客户/商机读路径来自普通表种子（VT 替身）  
 - [x] Confirm 后可在 store/API 见到 Activity / Opportunity 状态流转  
-- [x] 每条 AI 回复含 `agent_name` / `sources` / `confidence`  
-- [x] 文本路径可演示；语音为加分项（Web Speech）  
+- [x] 每条 AI 回复含 `agent_name` / `sources` / `confidence`（无来源显式「无来源」）  
+- [x] 文本路径可演示；**橙麦 Voice-First**（Web Speech）；键盘为 fallback  
 - [x] 选做：订单/物流查询 · 任务中心 · 会话落库 · SyncFailed 模拟  
+- [x] Compose 合成（客户速览总述）· Manifest Pipeline · Prompt 分版 · golden fixtures（见 [19](19-agent-reply-ui-hardening.md)）  
 
 ---
 
 ## 8. 一句话
 
-**现在只打穿：** 拜访录入 + 客户速览（+ 可选订单）· DeepSeek 自研编排 · Dataverse 普通表唯一数据源。  
-**现在不做：** Copilot / AI Builder / 真实 VT·SB·SAP / Brief Me 与售后全量 / 生产 ALM 全套。
+**现在只打穿：** 拜访录入 + 客户速览（+ 可选订单）· DeepSeek 自研编排 · **种子内存库为 Demo SoR**。  
+**现在不做：** Copilot / AI Builder / 真实 VT·SB·SAP / 真实 Dataverse Web API（另轨）/ Brief Me 与售后全量 / 生产 ALM 全套。

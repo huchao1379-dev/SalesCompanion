@@ -7,7 +7,7 @@
  */
 import type { DomainAgent } from './agentTypes.js'
 import * as tools from '../tools/dataverseTools.js'
-import { chatStructured, hasDeepSeek } from '../llm/deepseek.js'
+import { chatStructured, hasLlm } from '../llm/deepseek.js'
 import {
   opportunityInsightLlmOutputSchema,
   insightActionSchema,
@@ -79,7 +79,7 @@ export type OpportunityInsightResult = {
     crmUpdatedAt: string | null
   }
   updatedAt: string
-  mode: 'deepseek' | 'heuristic' | 'copilotstudio'
+  mode: 'deepseek' | 'openai' | 'heuristic' | 'copilotstudio'
   agentName: string
   visitCount: number
   missingFieldCount: number
@@ -544,7 +544,7 @@ export async function generateOpportunityInsight(
     primaryContact: contactName || null,
   }
 
-  if (hasDeepSeek()) {
+  if (hasLlm()) {
     try {
       const { data, mode: m } = await chatStructured({
         system: OPPORTUNITY_INSIGHT_SYSTEM,

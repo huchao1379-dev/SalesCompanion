@@ -5,26 +5,77 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: path.resolve(__dirname, '../.env') })
 
-const aiProvider = process.env.AI_PROVIDER?.trim().toLowerCase() === 'copilotstudio'
-  ? 'copilotstudio'
-  : 'deepseek'
+function resolveAiProvider(): 'deepseek' | 'openai' | 'copilotstudio' {
+  const raw = process.env.AI_PROVIDER?.trim().toLowerCase()
+  if (raw === 'copilotstudio') return 'copilotstudio'
+  if (raw === 'openai') return 'openai'
+  return 'deepseek'
+}
+
+/** Accept gpt6-luna / gpt-6-luna style aliases from env. */
+function normalizeOpenAiModel(raw: string | undefined): string {
+  const value = (raw || 'gpt-6-luna').trim()
+  if (/^gpt[-_]?6[-_]?luna$/i.test(value)) return 'gpt-6-luna'
+  return value || 'gpt-6-luna'
+}
+
+type OpenAiReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+function resolveOpenAiReasoningEffort(raw: string | undefined): OpenAiReasoningEffort {
+  const value = (raw || 'low').trim().toLowerCase()
+  if (
+    value === 'none' ||
+    value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'xhigh' ||
+    value === 'max'
+  ) {
+    return value
+  }
+  return 'low'
+}
+
+const aiProvider = resolveAiProvider()
+
+const openaiApiKey = process.env.OPENAI_API_KEY?.trim() || ''
+const openaiBaseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com').replace(/\/$/, '')
+const openaiModel = normalizeOpenAiModel(process.env.OPENAI_MODEL)
+const openaiReasoningEffort = resolveOpenAiReasoningEffort(process.env.OPENAI_REASONING_EFFORT)
+
+const deepseekApiKey = process.env.DEEPSEEK_API_KEY?.trim() || ''
+const deepseekBaseUrl = (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(
+  /\/$/,
+  '',
+)
+const deepseekModel = process.env.DEEPSEEK_MODEL || 'deepseek-chat'
+
+/** Chat LLM defaults for vision when provider already supports images (gpt-6-luna). */
+const defaultVisionApiKey =
+  aiProvider === 'openai' ? openaiApiKey : deepseekApiKey
+const defaultVisionBaseUrl = aiProvider === 'openai' ? openaiBaseUrl : deepseekBaseUrl
+const defaultVisionModel = aiProvider === 'openai' ? openaiModel : ''
 
 export const config = {
   port: Number(process.env.PORT || 8787),
   /** Local demo: 127.0.0.1. Cloud (Azure etc.): 0.0.0.0 */
   host: (process.env.HOST || '127.0.0.1').trim() || '127.0.0.1',
   aiProvider,
-  deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() || '',
-  deepseekBaseUrl: (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, ''),
-  deepseekModel: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+  deepseekApiKey,
+  deepseekBaseUrl,
+  deepseekModel,
+  openaiApiKey,
+  openaiBaseUrl,
+  openaiModel,
+  openaiReasoningEffort,
   /** Optional OpenAI-compatible vision model for image attachments. */
-  visionApiKey: process.env.VISION_API_KEY?.trim() || process.env.DEEPSEEK_API_KEY?.trim() || '',
+  visionApiKey: process.env.VISION_API_KEY?.trim() || defaultVisionApiKey,
   visionBaseUrl: (
     process.env.VISION_BASE_URL ||
-    process.env.DEEPSEEK_BASE_URL ||
+    defaultVisionBaseUrl ||
     'https://api.deepseek.com'
   ).replace(/\/$/, ''),
-  visionModel: process.env.VISION_MODEL?.trim() || '',
+  visionModel: process.env.VISION_MODEL?.trim() || defaultVisionModel,
   copilotStudioDirectConnectUrl: process.env.COPILOTSTUDIO_DIRECT_CONNECT_URL?.trim() || '',
   copilotStudioAccessToken: process.env.COPILOTSTUDIO_ACCESS_TOKEN?.trim() || '',
   copilotStudioTenantId: process.env.COPILOTSTUDIO_TENANT_ID?.trim() || '',
@@ -53,7 +104,25 @@ export function hasDeepSeek(): boolean {
   return config.aiProvider === 'deepseek' && Boolean(config.deepseekApiKey)
 }
 
-/** Vision needs an explicit VISION_MODEL (deepseek-chat is text-only). */
+export function hasOpenAI(): boolean {
+  return config.aiProvider === 'openai' && Boolean(config.openaiApiKey)
+}
+
+/** Active chat LLM for Domain Agents (DeepSeek or OpenAI). */
+export function hasLlm(): boolean {
+  return hasDeepSeek() || hasOpenAI()
+}
+
+export function llmSuccessMode(): 'deepseek' | 'openai' {
+  return config.aiProvider === 'openai' ? 'openai' : 'deepseek'
+}
+
+export function activeLlmModelName(): string {
+  if (config.aiProvider === 'openai') return config.openaiModel
+  return config.deepseekModel
+}
+
+/** Vision needs an explicit VISION_MODEL (deepseek-chat is text-only; openai defaults to gpt-6-luna). */
 export function hasVisionModel(): boolean {
   return Boolean(config.visionApiKey && config.visionModel)
 }

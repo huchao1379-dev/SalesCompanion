@@ -6,9 +6,12 @@ const CAPABILITY_CACHE_MS = 60_000
 type ApiHealth = {
   ok: boolean
   deepseek: boolean
+  openai?: boolean
+  llm?: boolean
+  llmModel?: string
   vision?: boolean
   visionModel?: string
-  aiProvider?: 'deepseek' | 'copilotstudio'
+  aiProvider?: 'deepseek' | 'openai' | 'copilotstudio'
   copilotstudio?: boolean
   dataverseMode: string
   promptVersion: string
@@ -178,7 +181,7 @@ type InsightApiResponse = {
     actionType?: 'follow_up' | 'log_activity' | 'opportunity' | 'meeting' | 'material' | 'other'
   }>
   updatedAt: string
-  mode: 'deepseek' | 'heuristic' | 'copilotstudio'
+  mode: 'deepseek' | 'openai' | 'heuristic' | 'copilotstudio'
   agentName: string
   confidence?: number
 }
@@ -232,11 +235,21 @@ export const api = {
     request(`/drafts/${encodeURIComponent(key)}/discard`, { method: 'POST', body: '{}' }),
   metrics: () =>
     request<{
-      todayVisits: number
-      riskOpportunities: number
-      pendingSync: number
-      openDrafts: number
-      draftAdoptionPct: number
+      invocationCount: number
+      byPromptVersion: Record<
+        string,
+        { count: number; success: number; latencyMs: number; avgLatencyMs: number }
+      >
+      byAgent: Record<string, { count: number; success: number; fallback: number }>
+      business: {
+        todayVisits: number
+        riskOpportunities: number
+        pendingSync: number
+        openDrafts: number
+        draftAdoptionPct: number
+        accountCount?: number
+        seedOpportunityCount?: number
+      }
     }>('/metrics'),
   accounts: () => request<{ accounts: unknown[] }>('/accounts'),
   account: (id: string) => request(`/accounts/${encodeURIComponent(id)}`),

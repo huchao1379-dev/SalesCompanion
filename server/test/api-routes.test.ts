@@ -19,10 +19,23 @@ test('health advertises the activity and opportunity insight routes', async () =
     const healthResponse = await fetch(`${baseUrl}/health`)
     assert.equal(healthResponse.status, 200)
     const health = await healthResponse.json() as {
+      agents?: number
+      skills?: number
       capabilities?: { activityInsight?: boolean; opportunityInsight?: boolean }
     }
     assert.equal(health.capabilities?.activityInsight, true)
     assert.equal(health.capabilities?.opportunityInsight, true)
+    assert.ok((health.agents ?? 0) > 0)
+    assert.ok((health.skills ?? 0) >= 7)
+
+    const agentsResponse = await fetch(`${baseUrl}/agents`)
+    assert.equal(agentsResponse.status, 200)
+    const agentsBody = await agentsResponse.json() as {
+      agents?: unknown[]
+      skills?: Array<{ intent?: string }>
+    }
+    assert.ok((agentsBody.agents?.length ?? 0) > 0)
+    assert.ok(agentsBody.skills?.some((s) => s.intent === 'general_assist'))
 
     const invalidInsightResponse = await fetch(`${baseUrl}/activity-insight`, {
       method: 'POST',

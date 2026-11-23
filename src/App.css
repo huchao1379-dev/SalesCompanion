@@ -12,13 +12,18 @@
   --green: #22c55e;
   --green-deep: #16a34a;
   --green-soft: rgba(34, 197, 94, 0.14);
+  --orange: #f97316;
+  --orange-deep: #ea580c;
+  --orange-soft: rgba(249, 115, 22, 0.16);
   --blue-soft: #e8f1ff;
   --blue-ink: #5b8def;
   --warn: #f5c84c;
   --warn-soft: rgba(245, 200, 76, 0.28);
   --danger: #ef4444;
   --primary: #3b82f6;
-  --accent: #22c55e;
+  /* Voice-First primary CTA (docs/03 · 05): orange mic; green reserved for success/Synced */
+  --accent: #f97316;
+  --accent-deep: #ea580c;
   --ok: #22c55e;
 
   --cal-meeting: #8b5cf6;
@@ -84,6 +89,7 @@
   --line: rgba(255, 255, 255, 0.08);
   --line-strong: rgba(255, 255, 255, 0.14);
   --green-soft: rgba(34, 197, 94, 0.2);
+  --orange-soft: rgba(249, 115, 22, 0.22);
   --blue-soft: #1a2740;
   --warn-soft: rgba(245, 200, 76, 0.22);
   --dash-top-bg: #1a2028;

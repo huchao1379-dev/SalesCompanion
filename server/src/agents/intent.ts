@@ -1,35 +1,39 @@
-import { chatStructured, hasDeepSeek } from '../llm/deepseek.js'
+import { chatStructured, hasLlm } from '../llm/deepseek.js'
+import { formatLlmTransportError } from '../llm/errors.js'
 import { intentOutputSchema } from '../llm/schemas.js'
 import type { Intent } from '../types.js'
 import type { ConversationTurn } from './agentTypes.js'
-import { INTENT_SYSTEM } from './prompts.js'
+import { buildIntentSystem } from './prompts/intent.js'
+import { findHardMatchSkill, routableIntents, skillsForRouterPrompt } from './skills.js'
 import { nowIsoInZone } from '../util/datetime.js'
 
-const INTENTS: Intent[] = [
-  'capture_visit',
-  'query_account',
-  'query_order',
-  'work_summary',
-  'general_assist',
-  'clarify',
-]
+const INTENTS: Intent[] = routableIntents()
+
+/** @deprecated Prefer findHardMatchSkill / skills catalog; kept for orchestrator compat. */
+export function looksLikeAccountListQuery(text: string) {
+  return findHardMatchSkill(text)?.intent === 'list_accounts'
+}
 
 export type IntentFocus = 'capability' | 'greeting' | 'missing_info' | 'ambiguous' | 'none'
 
 export type IntentClassification = {
   intent: Intent
   confidence: number
-  mode: 'deepseek' | 'heuristic'
+  mode: 'deepseek' | 'openai' | 'heuristic'
   reason?: string
   needsClarification: boolean
   missingSlots: string[]
   focus: IntentFocus
+  /** When LLM path failed and heuristic was used. */
+  llmError?: string
 }
 
 export type IntentOptions = {
   history?: ConversationTurn[]
   memory?: Record<string, string>
   knownAccounts?: Array<{ name: string; aliases?: string[] }>
+  /** Skip LLM — used by golden fixtures for offline / deterministic routing. */
+  forceHeuristic?: boolean
 }
 
 function isIntent(value: unknown): value is Intent {
@@ -44,14 +48,68 @@ function compactHistory(history: ConversationTurn[] = []) {
   }))
 }
 
+/**
+ * Post-LLM / post-heuristic refinements that use memory, not keyword sprawl.
+ * hardMatch skills (e.g. list_accounts) win over model misroutes.
+ */
+function refineClassification(
+  utterance: string,
+  base: Omit<IntentClassification, 'mode'>,
+  options: IntentOptions,
+): Omit<IntentClassification, 'mode'> {
+  const text = utterance.trim()
+  const memory = options.memory || {}
+  const hard = findHardMatchSkill(text)
+  if (hard && hard.intent !== base.intent) {
+    return {
+      intent: hard.intent,
+      confidence: Math.max(base.confidence, 0.94),
+      reason: `技能护栏：${hard.name}`,
+      needsClarification: false,
+      missingSlots: [],
+      focus: 'none',
+    }
+  }
+
+  const hasAccountContext = Boolean(memory.accountId || memory.accountName)
+  const isCapabilityOrGreeting =
+    /你能做|能做什么|有什么功能|怎么用|你会什么|帮我什么|capabilities|what can you/i.test(text) ||
+    /^(你好|嗨|在吗|hello|hi)[\s!！.。]*$/i.test(text)
+
+  // Pronoun / ambiguous follow-ups with remembered account → prefer account query.
+  if (
+    base.intent === 'clarify' &&
+    hasAccountContext &&
+    !isCapabilityOrGreeting &&
+    (/那|它|这个|这家|刚才|这单|那单/.test(text) ||
+      (base.focus === 'ambiguous' && /最近|怎么样|进度|信用|商机|画像/.test(text)))
+  ) {
+    return {
+      intent: 'query_account',
+      confidence: Math.max(base.confidence, 0.84),
+      reason: '多轮客户记忆继承',
+      needsClarification: false,
+      missingSlots: [],
+      focus: 'none',
+    }
+  }
+
+  return base
+}
+
+/**
+ * Skill-catalog Intent Router.
+ * Primary path: DeepSeek agent chooses among ROUTABLE_SKILLS.
+ * Fallback: thin heuristic (offline / LLM failure) — not the extension surface.
+ */
 export async function classifyIntent(
   utterance: string,
   options: IntentOptions = {},
 ): Promise<IntentClassification> {
-  if (hasDeepSeek()) {
+  if (hasLlm() && !options.forceHeuristic) {
     try {
       const { data, mode } = await chatStructured({
-        system: INTENT_SYSTEM,
+        system: buildIntentSystem(),
         user: JSON.stringify({
           utterance,
           now: nowIsoInZone(),
@@ -71,6 +129,7 @@ export async function classifyIntent(
             name: account.name,
             aliases: account.aliases || [],
           })),
+          skills: skillsForRouterPrompt(),
         }),
         temperature: 0.1,
         maxTokens: 260,
@@ -78,23 +137,37 @@ export async function classifyIntent(
       })
       if (isIntent(data.intent)) {
         const confidence = data.confidence ?? 0.8
-        return {
-          intent: data.intent,
-          confidence,
-          mode,
-          reason: data.reason,
-          needsClarification: data.needsClarification ?? confidence < 0.6,
-          missingSlots: data.missingSlots ?? [],
-          focus: data.focus ?? 'none',
-        }
+        const refined = refineClassification(
+          utterance,
+          {
+            intent: data.intent,
+            confidence,
+            reason: data.reason,
+            needsClarification: data.needsClarification ?? confidence < 0.6,
+            missingSlots: data.missingSlots ?? [],
+            focus: data.focus ?? 'none',
+          },
+          options,
+        )
+        return { ...refined, mode }
       }
-    } catch {
-      /* fall through to deterministic router */
+    } catch (error) {
+      const heuristic = refineClassification(utterance, heuristicIntent(utterance, options), options)
+      return {
+        ...heuristic,
+        mode: 'heuristic',
+        llmError: formatLlmTransportError(error),
+      }
     }
   }
-  return { ...heuristicIntent(utterance, options), mode: 'heuristic' }
+  const heuristic = refineClassification(utterance, heuristicIntent(utterance, options), options)
+  return { ...heuristic, mode: 'heuristic' }
 }
 
+/**
+ * Offline / failure fallback. Keep thin and stable for golden tests.
+ * Do NOT grow business coverage here — add a skill + pipeline instead.
+ */
 function heuristicIntent(utterance: string, options: IntentOptions): Omit<IntentClassification, 'mode'> {
   const text = utterance.trim()
   const memory = options.memory || {}
@@ -105,13 +178,23 @@ function heuristicIntent(utterance: string, options: IntentOptions): Omit<Intent
     return result('clarify', 0.92, '内容过短', true, ['action'], 'missing_info')
   }
 
+  const hard = findHardMatchSkill(text)
+  if (hard) {
+    return result(hard.intent, 0.94, `技能护栏：${hard.name}`, false, [], 'none')
+  }
+
+  if (
+    /你是谁|你叫什么|介绍一下你自己|你是什么|who are you|what are you/i.test(text)
+  ) {
+    return result('clarify', 0.93, '自我介绍', false, [], 'greeting')
+  }
   if (/你能做|能做什么|有什么功能|怎么用|你会什么|帮我什么|capabilities|what can you/i.test(text)) {
     return result('clarify', 0.92, '能力询问', false, [], 'capability')
   }
   if (/^(你好|嗨|在吗|hello|hi)[\s!！.。]*$/i.test(text)) {
     return result('clarify', 0.9, '打招呼', false, [], 'greeting')
   }
-  if (/日报|周报|工作总结|工作小结|今日小结|今日总结|帮我写.*总结|写.*日报|写.*周报/.test(text)) {
+  if (/日报|周报|工作总结|工作小结|今日小结|今日总结|帮我写.*总结|写.*日报|写.*周报|总结我今天/.test(text)) {
     return result('work_summary', 0.9, '工作总结', false, [], 'none')
   }
   if (
@@ -134,15 +217,24 @@ function heuristicIntent(utterance: string, options: IntentOptions): Omit<Intent
   }
 
   const namedAccount = /仁济|Hospital Alpha|Hospital Beta|Hospital Gamma|Hospital Delta|医院/.test(text)
-  const looksLikeVisit = /拜访|感兴趣|定标|要\s*\d+\s*台|\d+\s*台|刚拜访|录入拜访/.test(text)
+  const looksLikeVisit = /拜访|感兴趣|定标|要\s*\d+\s*台|\d+\s*台|刚拜访|录入拜访|记一下/.test(text)
 
+  // Bare account name with no action → clarify.
   if (
+    namedAccount &&
+    text.length < 20 &&
     !looksLikeVisit &&
-    (/怎么样|进度|画像|信用|最近怎么样|客户.*怎么|Hospital.*(进度|怎么样)|仁济.*怎么|Alpha.*进度/i.test(
-      text,
-    ) ||
-      (namedAccount && /最近|进度|怎么样|画像|信用/.test(text)))
+    !/怎么样|进度|画像|信用|订单|物流|总结|商机/.test(text)
   ) {
+    return result('clarify', 0.78, '仅客户名缺动作', true, ['action'], 'missing_info')
+  }
+
+  // Need a named account, memory, or explicit “客户/Hospital” cue — bare「怎么样了」→ clarify.
+  const looksLikeAccountQuery =
+    (namedAccount && /最近|进度|怎么样|画像|信用|总结|商机/.test(text)) ||
+    /客户.*怎么|Hospital.*(进度|怎么样)|仁济.*怎么|Alpha.*进度|总结.*情况/i.test(text) ||
+    (hasAccountContext && /最近|进度|怎么样|画像|信用|商机/.test(text))
+  if (!looksLikeVisit && looksLikeAccountQuery) {
     return result(
       'query_account',
       hasAccountContext || namedAccount ? 0.88 : 0.62,

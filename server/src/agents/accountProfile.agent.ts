@@ -4,7 +4,8 @@ import {
   resolveAccount,
   synthesizeAccountProfile,
 } from './accountProfile.js'
-import { hasDeepSeek } from '../llm/deepseek.js'
+import { hasLlm } from '../llm/deepseek.js'
+import type { LlmSuccessMode } from '../llm/types.js'
 import * as tools from '../tools/dataverseTools.js'
 import type { AgentMessage } from '../types.js'
 
@@ -21,9 +22,9 @@ export const accountProfileAgent: DomainAgent = {
     const fromExtract = ctx.state.extracted?.accountName
     let account = fromExtract ? await resolveAccount(fromExtract) : undefined
     let toolMessage: AgentMessage | undefined
-    let mode: 'deepseek' | 'heuristic' | undefined
+    let mode: LlmSuccessMode | 'heuristic' | undefined
 
-    if (!ctx.state.extracted && hasDeepSeek()) {
+    if (!ctx.state.extracted && hasLlm()) {
       try {
         const result = await queryAccountProfileWithTools(ctx.utterance, ctx.memory.accountId)
         account = result.account

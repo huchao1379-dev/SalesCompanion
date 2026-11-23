@@ -35,6 +35,13 @@
   color: #0f766e;
 }
 
+.source-chip.is-empty {
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.28);
+  color: #64748b;
+  font-weight: 550;
+}
+
 .source-chip--knowledge {
   background: rgba(124, 58, 237, 0.08);
   border-color: rgba(124, 58, 237, 0.14);

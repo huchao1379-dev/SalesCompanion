@@ -1,4 +1,17 @@
-/** Message Envelope — aligns with docs/03-agent-architecture.md */
+/**
+ * Message Envelope — aligns with docs/03 and server/src/shared/envelope.ts.
+ * Keep ENVELOPE_REQUIRED_KEYS in sync with the server contract test.
+ */
+
+export const ENVELOPE_REQUIRED_KEYS = [
+  'id',
+  'role',
+  'agent_name',
+  'content',
+  'sources',
+  'confidence',
+  'createdAt',
+] as const
 
 export type AgentRole = 'user' | 'assistant' | 'system' | 'tool'
 
@@ -234,7 +247,7 @@ export type OrchestratorResponse = {
   context: Record<string, string>
   latencyMs: number
   intent?: string
-  mode?: 'deepseek' | 'heuristic' | 'mixed' | 'copilotstudio'
+  mode?: 'deepseek' | 'openai' | 'heuristic' | 'mixed' | 'copilotstudio'
   degraded_reason?: string
   steps?: AgentStep[]
 }

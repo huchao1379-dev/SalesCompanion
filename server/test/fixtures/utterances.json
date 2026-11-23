@@ -1,0 +1,122 @@
+[
+  {
+    "id": "demo-capture-renji",
+    "utterance": "刚拜访完上海仁济医院张主任，他对监护仪 N17 感兴趣，要 12 台，下周三再约一次定标书细节。",
+    "expectIntent": "capture_visit",
+    "expectNeedsClarification": false,
+    "tags": ["demo", "capture"]
+  },
+  {
+    "id": "demo-query-renji",
+    "utterance": "仁济医院最近怎么样？",
+    "expectIntent": "query_account",
+    "expectNeedsClarification": false,
+    "tags": ["demo", "query"]
+  },
+  {
+    "id": "list-my-accounts",
+    "utterance": "我的客户有哪些？",
+    "expectIntent": "list_accounts",
+    "expectNeedsClarification": false,
+    "tags": ["list", "boundary"]
+  },
+  {
+    "id": "list-account-count",
+    "utterance": "种子库一共几家客户",
+    "expectIntent": "list_accounts",
+    "expectNeedsClarification": false,
+    "tags": ["list", "boundary"]
+  },
+  {
+    "id": "demo-order-renji",
+    "utterance": "查一下仁济医院上个订单的物流",
+    "expectIntent": "query_order",
+    "expectNeedsClarification": false,
+    "tags": ["demo", "order"]
+  },
+  {
+    "id": "work-summary-today",
+    "utterance": "帮我写今日工作小结",
+    "expectIntent": "work_summary",
+    "expectNeedsClarification": false,
+    "tags": ["work"]
+  },
+  {
+    "id": "clarify-ambiguous-order",
+    "utterance": "这单怎么样了",
+    "expectIntent": "clarify",
+    "expectNeedsClarification": true,
+    "tags": ["boundary", "clarify"]
+  },
+  {
+    "id": "clarify-visit-no-hospital",
+    "utterance": "刚拜访了张主任",
+    "expectIntent": "capture_visit",
+    "expectNeedsClarification": true,
+    "missingSlotsIncludes": ["account"],
+    "tags": ["boundary", "capture"]
+  },
+  {
+    "id": "capability",
+    "utterance": "你能做什么？",
+    "expectIntent": "clarify",
+    "expectFocus": "capability",
+    "tags": ["clarify"]
+  },
+  {
+    "id": "general-email",
+    "utterance": "帮我写一封拜访后的跟进邮件，语气专业简洁。",
+    "expectIntent": "general_assist",
+    "tags": ["general"]
+  },
+  {
+    "id": "multiturn-opp-followup",
+    "utterance": "那它的商机呢？",
+    "expectIntent": "query_account",
+    "memory": { "accountId": "acc-renji", "accountName": "上海仁济医院" },
+    "history": [
+      { "role": "user", "content": "仁济医院最近怎么样？" },
+      { "role": "assistant", "content": "仁济信用 A，近访正常。", "agentName": "客户画像 Agent" }
+    ],
+    "tags": ["multiturn"]
+  },
+  {
+    "id": "account-only-name",
+    "utterance": "上海仁济医院",
+    "expectIntent": "clarify",
+    "missingSlotsIncludes": ["action"],
+    "tags": ["boundary"]
+  },
+  {
+    "id": "summary-account-vs-work",
+    "utterance": "总结仁济的情况",
+    "expectIntent": "query_account",
+    "tags": ["boundary"]
+  },
+  {
+    "id": "summary-my-work",
+    "utterance": "总结我今天的拜访",
+    "expectIntent": "work_summary",
+    "tags": ["boundary"]
+  },
+  {
+    "id": "greeting",
+    "utterance": "你好",
+    "expectIntent": "clarify",
+    "expectFocus": "greeting",
+    "tags": ["clarify"]
+  },
+  {
+    "id": "capture-short",
+    "utterance": "记一下：Hospital Alpha 对 A1 有兴趣，大概 8 台。",
+    "expectIntent": "capture_visit",
+    "tags": ["capture"]
+  },
+  {
+    "id": "order-vague-with-memory",
+    "utterance": "上个订单物流怎么样了",
+    "expectIntent": "query_order",
+    "memory": { "accountId": "acc-renji", "accountName": "上海仁济医院" },
+    "tags": ["multiturn", "order"]
+  }
+]

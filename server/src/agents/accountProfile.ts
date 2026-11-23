@@ -1,9 +1,11 @@
 import {
   chatStructured,
   chatWithTools,
-  hasDeepSeek,
+  hasLlm,
+  llmSuccessMode,
   parseStructuredJson,
 } from '../llm/deepseek.js'
+import type { LlmSuccessMode } from '../llm/types.js'
 import {
   accountProfileOutputSchema,
 } from '../llm/schemas.js'
@@ -405,15 +407,15 @@ export async function buildAccountProfileMessage(
   }
 }
 
-/** DeepSeek 摘要合成；无 Key / 失败时回落启发式。 */
+/** LLM 摘要合成；无 Key / 失败时回落启发式。 */
 export async function synthesizeAccountProfile(
   account: AccountRecord,
   utterance?: string,
   profileData?: AccountProfileData,
-): Promise<{ message: AgentMessage; mode: 'deepseek' | 'heuristic' }> {
+): Promise<{ message: AgentMessage; mode: LlmSuccessMode | 'heuristic' }> {
   const data = profileData ?? (await loadProfileData(account))
   const fallback = await buildAccountProfileMessage(account, utterance, data)
-  if (!hasDeepSeek()) return { message: fallback, mode: 'heuristic' }
+  if (!hasLlm()) return { message: fallback, mode: 'heuristic' }
 
   const { facts, sources, unverifiedNotes, meta } = profileFacts(account, data)
   try {
@@ -459,8 +461,8 @@ export async function synthesizeAccountProfile(
 export async function queryAccountProfileWithTools(
   utterance: string,
   knownAccountId?: string,
-): Promise<{ account: AccountRecord; message: AgentMessage; mode: 'deepseek' }> {
-  const { finalText, toolResults } = await chatWithTools({
+): Promise<{ account: AccountRecord; message: AgentMessage; mode: LlmSuccessMode }> {
+  const { finalText, toolResults, mode } = await chatWithTools({
     system: `${ACCOUNT_PROFILE_SYSTEM}\n\n${ACCOUNT_PROFILE_TOOL_ADDENDUM}`,
     user: JSON.stringify({
       question: utterance,
@@ -490,7 +492,7 @@ export async function queryAccountProfileWithTools(
   )
   return {
     account,
-    mode: 'deepseek',
+    mode: mode || llmSuccessMode(),
     message: {
       ...fallback,
       content: output.summary?.trim() || fallback.content,

@@ -60,12 +60,13 @@ export function computeHomeMetrics(drafts: DraftPayload[] = listDrafts()): HomeM
 export async function fetchHomeMetrics(): Promise<HomeMetrics> {
   try {
     const m = await api.metrics()
+    const business = m.business ?? (m as unknown as HomeMetrics)
     return {
-      todayVisits: m.todayVisits,
-      riskOpportunities: m.riskOpportunities,
-      pendingSync: m.pendingSync,
-      draftAdoptionPct: m.draftAdoptionPct,
-      openDrafts: m.openDrafts,
+      todayVisits: business.todayVisits,
+      riskOpportunities: business.riskOpportunities,
+      pendingSync: business.pendingSync,
+      draftAdoptionPct: business.draftAdoptionPct,
+      openDrafts: business.openDrafts,
     }
   } catch {
     return computeHomeMetrics()

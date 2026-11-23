@@ -28,7 +28,7 @@ export type OpportunityInsightView = {
   actions: InsightAction[]
   evidence: OpportunityInsightEvidence
   updatedAt: string
-  mode: 'deepseek' | 'heuristic' | 'copilotstudio'
+  mode: 'deepseek' | 'openai' | 'heuristic' | 'copilotstudio'
   agentName: string
   visitCount: number
   missingFieldCount: number
@@ -107,7 +107,10 @@ function normalizeInsight(raw: InsightPayloadInput): OpportunityInsightView {
       crmUpdatedAt: evidence.crmUpdatedAt ?? null,
     },
     updatedAt: raw.updatedAt || new Date().toISOString(),
-    mode: raw.mode === 'deepseek' || raw.mode === 'copilotstudio' ? raw.mode : 'heuristic',
+    mode:
+      raw.mode === 'deepseek' || raw.mode === 'openai' || raw.mode === 'copilotstudio'
+        ? raw.mode
+        : 'heuristic',
     agentName: raw.agentName || '商机洞察 Agent',
     visitCount: evidence.recentVisitCount ?? raw.visitCount ?? 0,
     missingFieldCount: evidence.missingFieldCount ?? raw.missingFieldCount ?? 0,

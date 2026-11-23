@@ -45,7 +45,7 @@ export type AgentContext = {
   history?: ConversationTurn[]
   /** Known account names/aliases from the active store, for extraction grounding. */
   knownAccounts?: Array<{ id: string; name: string; aliases?: string[] }>
-  modes: Set<'deepseek' | 'heuristic'>
+  modes: Set<'deepseek' | 'openai' | 'heuristic'>
 }
 
 export type AgentResult = {
@@ -56,7 +56,9 @@ export type AgentResult = {
   review?: ReviewFinding[]
   /** Stop remaining steps in a sequential pipeline. */
   halt?: boolean
-  mode?: 'deepseek' | 'heuristic'
+  mode?: 'deepseek' | 'openai' | 'heuristic'
+  /** When LLM path fails and agent returns heuristic, short reason for steps / logs. */
+  fallbackReason?: string
 }
 
 /**

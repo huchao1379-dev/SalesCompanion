@@ -1,24 +1,17 @@
 import { z } from 'zod'
-import { config, hasDeepSeek } from '../config.js'
+import {
+  config,
+  hasDeepSeek,
+  hasLlm,
+  hasOpenAI,
+  llmSuccessMode,
+} from '../config.js'
+import { wrapLlmFetchError } from './errors.js'
+import { extractJsonObject, parseJsonLenient } from './jsonRepair.js'
+import * as openai from './openai.js'
+import type { ChatMessage, ChatTool, LlmSuccessMode, ToolCall } from './types.js'
 
-type ToolCall = {
-  id: string
-  type: 'function'
-  function: { name: string; arguments: string }
-}
-
-export type ChatMessage =
-  | { role: 'system' | 'user'; content: string }
-  | { role: 'assistant'; content: string | null; tool_calls?: ToolCall[] }
-  | { role: 'tool'; content: string; tool_call_id: string }
-
-export type ChatTool = {
-  name: string
-  description: string
-  parameters: Record<string, unknown>
-  inputSchema: z.ZodType
-  execute: (input: unknown) => Promise<unknown>
-}
+export type { ChatMessage, ChatTool, LlmSuccessMode, ToolCall }
 
 type CompletionMessage = {
   content?: string | null
@@ -74,7 +67,10 @@ async function postCompletion(body: Record<string, unknown>): Promise<Response> 
       await sleep(350 * (attempt + 1))
     }
   }
-  throw lastError instanceof Error ? lastError : new Error('DeepSeek request failed')
+  throw wrapLlmFetchError(
+    'DeepSeek',
+    lastError instanceof Error ? lastError : new Error('DeepSeek request failed'),
+  )
 }
 
 async function requestCompletion(
@@ -106,7 +102,11 @@ export async function chatStructured<T>(params: {
   temperature?: number
   maxTokens?: number
   schema: z.ZodType<T>
-}): Promise<{ data: T; mode: 'deepseek'; raw: string }> {
+}): Promise<{ data: T; mode: LlmSuccessMode; raw: string }> {
+  if (hasOpenAI()) {
+    return openai.chatStructured(params)
+  }
+
   const messages: ChatMessage[] = [
     { role: 'system', content: params.system },
     { role: 'user', content: params.user },
@@ -145,8 +145,7 @@ export async function chatStructured<T>(params: {
 }
 
 export function parseStructuredJson<T>(raw: string, schema: z.ZodType<T>): T {
-  const json = extractJsonObject(raw)
-  const parsed: unknown = JSON.parse(json)
+  const parsed = parseJsonLenient(raw)
   return schema.parse(parsed)
 }
 
@@ -159,10 +158,14 @@ export async function chatWithTools(params: {
   maxTokens?: number
   maxToolRounds?: number
 }): Promise<{
-  mode: 'deepseek'
+  mode: LlmSuccessMode
   finalText: string
   toolResults: Array<{ name: string; result: unknown }>
 }> {
+  if (hasOpenAI()) {
+    return openai.chatWithTools(params)
+  }
+
   const toolsByName = new Map(params.tools.map((tool) => [tool.name, tool]))
   const messages: ChatMessage[] = [
     { role: 'system', content: params.system },
@@ -223,41 +226,4 @@ export async function chatWithTools(params: {
   throw new Error('DeepSeek tool loop ended unexpectedly')
 }
 
-function stripFences(text: string) {
-  return text
-    .replace(/^```json\s*/i, '')
-    .replace(/^```\s*/i, '')
-    .replace(/\s*```$/i, '')
-    .trim()
-}
-
-/** Extract the first balanced JSON object; tolerates leading/trailing prose. */
-function extractJsonObject(text: string) {
-  const stripped = stripFences(text)
-  const start = stripped.indexOf('{')
-  if (start < 0) return stripped
-  let depth = 0
-  let inString = false
-  let escaped = false
-  for (let i = start; i < stripped.length; i += 1) {
-    const char = stripped[i]
-    if (inString) {
-      if (escaped) escaped = false
-      else if (char === '\\') escaped = true
-      else if (char === '"') inString = false
-      continue
-    }
-    if (char === '"') {
-      inString = true
-      continue
-    }
-    if (char === '{') depth += 1
-    if (char === '}') {
-      depth -= 1
-      if (depth === 0) return stripped.slice(start, i + 1)
-    }
-  }
-  return stripped
-}
-
-export { hasDeepSeek }
+export { hasDeepSeek, hasLlm, hasOpenAI, llmSuccessMode, extractJsonObject, parseJsonLenient }

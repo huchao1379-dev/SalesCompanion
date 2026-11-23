@@ -13,12 +13,15 @@ import { getOrchestratorMode, orchestrate } from '../../agents/orchestratorClien
 import { DraftCard } from '../../components/DraftCard'
 import {
   IconBack,
+  IconChevronDown,
   IconKeyboard,
   IconMic,
   IconPaperclip,
+  IconPlus,
   IconSendUp,
   IconSpark,
   IconStop,
+  IconTrash,
 } from '../../components/DashIcons'
 import { IconButton } from '../../components/IconButton'
 import { MessageUiCard } from '../../components/MessageUiCard'
@@ -26,14 +29,24 @@ import { SourceChips } from '../../components/SourceChips'
 import {
   appendMessages,
   clearAccountContext,
-  clearConversation,
+  createConversation,
+  deleteConversation,
+  listConversations,
   loadConversation,
   replaceMessage,
+  switchConversation,
   updateMessage,
   type ConversationState,
+  type ConversationSummary,
 } from '../../data/conversationStore'
 import { api } from '../../api/client'
-import { confirmAndSyncDetailed, discardDraft, listDrafts, upsertDraft } from '../../data/dataverse'
+import {
+  confirmAndSyncDetailed,
+  discardDraft,
+  listDrafts,
+  refreshDraftsFromApi,
+  upsertDraft,
+} from '../../data/dataverse'
 import { canConfirmDraft } from '../../data/syncStatus'
 import { useWebSpeech } from '../../speech/useWebSpeech'
 
@@ -58,23 +71,24 @@ const ATTACH_ACCEPT =
   'image/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.md'
 const ATTACH_MAX_COUNT = 5
 const ATTACH_MAX_BYTES = 10 * 1024 * 1024
-const BOT_NAME = 'Copilot'
+/** Fallback display only when envelope lacks agent_name — never mask a real agent. */
+const BOT_NAME = '销售 Copilot'
 const NEAR_BOTTOM_PX = 96
 const TIME_GROUP_MS = 2 * 60 * 1000
 
-/** Honest pending labels — not tied to a specific domain agent. */
+/** Honest pending labels — replaced by server `steps` when the turn completes. */
 const PROGRESS_PHASES = [
   { afterMs: 0, label: '正在理解你的问题' },
-  { afterMs: 1600, label: '正在调用相关能力' },
-  { afterMs: 4200, label: '正在整理答复' },
+  { afterMs: 1600, label: '正在编排相关 Agent' },
+  { afterMs: 4200, label: '正在汇总答复' },
 ] as const
 
 function progressPhasesFor(utterance: string, hasAttachments: boolean) {
   if (hasAttachments) {
     return [
       { afterMs: 0, label: '正在理解附件与问题' },
-      { afterMs: 1800, label: '正在调用相关能力' },
-      { afterMs: 4500, label: '正在整理答复' },
+      { afterMs: 1800, label: '正在编排相关 Agent' },
+      { afterMs: 4500, label: '正在汇总答复' },
     ]
   }
   const t = utterance.trim()
@@ -82,7 +96,7 @@ function progressPhasesFor(utterance: string, hasAttachments: boolean) {
     return [
       { afterMs: 0, label: '正在理解助手请求' },
       { afterMs: 1500, label: '正在检索或起草内容' },
-      { afterMs: 4000, label: '正在整理助手答复' },
+      { afterMs: 4000, label: '正在汇总助手答复' },
     ]
   }
   if (/拜访|录入|记一下|建草稿|刚见|刚拜访/.test(t)) {
@@ -125,14 +139,15 @@ const HELP_ITEMS = [
 
 const QUICK_CHIPS = [
   {
-    label: '录入拜访',
-    prompt: '刚拜访完客户，对方对产品有兴趣，想约下周再谈细节，帮我生成活动草稿。',
+    label: '仁济拜访录入',
+    prompt:
+      '刚拜访完上海仁济医院张主任，他对监护仪 N17 感兴趣，要 12 台，下周三再约一次定标书细节。',
   },
-  { label: '查客户画像', prompt: '帮我看看这家客户最近怎么样，信用和开放商机如何？' },
-  { label: '查订单物流', prompt: '查一下最近一笔订单的物流进度。' },
+  { label: '仁济客户速览', prompt: '仁济医院最近怎么样？' },
+  { label: '查订单物流', prompt: '查一下仁济医院上个订单的物流' },
   { label: '写跟进邮件', prompt: '帮我写一封拜访后的跟进邮件，语气专业简洁。' },
-  { label: '搜索资料', prompt: '帮我搜索一下医疗设备集采相关的公开政策要点。' },
-  { label: '写今日小结', prompt: '根据今天的跟进帮我写一段工作小结。' },
+  { label: '那它的商机呢', prompt: '那它的商机呢？' },
+  { label: '写今日小结', prompt: '帮我写今日工作小结' },
 ] as const
 
 type Props = {
@@ -339,11 +354,16 @@ function NativeChat({
   )
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [showNewMsgHint, setShowNewMsgHint] = useState(false)
-  const [clearArmed, setClearArmed] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [conversationList, setConversationList] = useState<ConversationSummary[]>(() =>
+    listConversations(),
+  )
   const [composerMode, setComposerMode] = useState<'text' | 'voice'>('text')
   const [voiceHint, setVoiceHint] = useState('')
   const [syncNotice, setSyncNotice] = useState('')
   const [webSearchEnabled, setWebSearchEnabled] = useState(false)
+  const voicePreferredRef = useRef(false)
+  const historyPanelRef = useRef<HTMLDivElement | null>(null)
 
   const messages = useMemo(() => conversation.messages, [conversation.messages])
   const isEmpty = messages.length === 0
@@ -376,6 +396,33 @@ function NativeChat({
     }
   }, [])
 
+  // Voice-First: prefer mic when Web Speech is available (docs/03 · 05).
+  useEffect(() => {
+    if (voicePreferredRef.current) return
+    if (!speech.supported) return
+    voicePreferredRef.current = true
+    setComposerMode('voice')
+    setVoiceHint('长按识别语音；点键盘可切回文字输入')
+  }, [speech.supported])
+
+  // Hydrate drafts from API on mount; merge with local mirror.
+  useEffect(() => {
+    let cancelled = false
+    void refreshDraftsFromApi()
+      .then((serverDrafts) => {
+        if (cancelled) return
+        setDrafts(
+          serverDrafts.filter((draft) => draft.syncStatus !== 'Discarded').slice(0, 8),
+        )
+      })
+      .catch(() => {
+        /* keep local listDrafts() seed */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const attachmentsRef = useRef(attachments)
   useEffect(() => {
     attachmentsRef.current = attachments
@@ -390,10 +437,23 @@ function NativeChat({
   }, [])
 
   useEffect(() => {
-    if (!clearArmed) return
-    const t = window.setTimeout(() => setClearArmed(false), 4000)
-    return () => window.clearTimeout(t)
-  }, [clearArmed])
+    if (!historyOpen) return
+    setConversationList(listConversations())
+    function onPointerDown(event: MouseEvent | TouchEvent) {
+      const target = event.target as Node | null
+      if (!target) return
+      if (historyPanelRef.current?.contains(target)) return
+      const actions = (event.target as HTMLElement | null)?.closest?.('.chat-screen__actions')
+      if (actions) return
+      setHistoryOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('touchstart', onPointerDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('touchstart', onPointerDown)
+    }
+  }, [historyOpen])
 
   useEffect(() => {
     const el = bodyRef.current
@@ -446,6 +506,21 @@ function NativeChat({
   function setConversationState(next: ConversationState) {
     conversationRef.current = next
     setConversation(next)
+    setConversationList(listConversations())
+  }
+
+  function formatConversationTime(iso: string) {
+    const date = new Date(iso)
+    if (Number.isNaN(date.getTime())) return ''
+    const now = new Date()
+    const sameDay =
+      date.getFullYear() === now.getFullYear() &&
+      date.getMonth() === now.getMonth() &&
+      date.getDate() === now.getDate()
+    if (sameDay) {
+      return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    }
+    return date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
   }
 
   function clearAttachments(list: PendingAttachment[] = attachments) {
@@ -541,12 +616,13 @@ function NativeChat({
       assistantId,
     }
     setGenerating(true)
-    setClearArmed(false)
+    setHistoryOpen(false)
     setSyncNotice('')
 
     const pendingMsg: AgentMessage = {
       id: assistantId,
       role: 'assistant',
+      agent_id: 'Orchestrator',
       agent_name: BOT_NAME,
       content: '',
       sources: [],
@@ -569,6 +645,7 @@ function NativeChat({
         progressLabel: progressPhasesFor(utterance, hasAttachments)[0]?.label || PROGRESS_PHASES[0].label,
         failureKind: undefined,
         retryUtterance: utterance,
+        agent_id: 'Orchestrator',
         agent_name: BOT_NAME,
         agent_chain: undefined,
       })
@@ -608,20 +685,39 @@ function NativeChat({
         for (const draft of res.drafts) {
           const index = next.findIndex((item) => item.idempotencyKey === draft.idempotencyKey)
           if (index >= 0) next[index] = draft
-          else next.push(draft)
+          else next.unshift(draft)
         }
+        // Keep confirmed/synced cards; drop discarded; cap list.
         return next
+          .filter((draft) => draft.syncStatus !== 'Discarded')
+          .slice(0, 8)
       })
+      const fallbackSteps = (res.steps || []).filter(
+        (step) => step.status === 'fallback' || step.status === 'error',
+      )
       setSyncNotice(
         res.degraded_reason ||
-          (res.mode === 'heuristic' ? '当前为规则兜底模式，未调用 DeepSeek。' : ''),
+          (res.mode === 'heuristic'
+            ? '当前为规则兜底模式（模型未成功调用；请检查 API Key / 网络或 OPENAI_BASE_URL 代理）。'
+            : '') ||
+          (fallbackSteps.length
+            ? `部分步骤规则兜底：${fallbackSteps.map((s) => s.agentName).join('、')}`
+            : ''),
       )
 
       const normalized = normalizeAssistantMessages(res.messages, completedAt)
       const withSteps = normalized.map((message, index) =>
         index === normalized.length - 1 && res.steps?.length
-          ? { ...message, steps: res.steps }
-          : message,
+          ? {
+              ...message,
+              steps: res.steps,
+              progressLabel: undefined,
+              agent_name: message.agent_name?.trim() || BOT_NAME,
+            }
+          : {
+              ...message,
+              agent_name: message.agent_name?.trim() || BOT_NAME,
+            },
       )
       const next = replaceMessage(
         conversationRef.current,
@@ -632,10 +728,11 @@ function NativeChat({
               {
                 id: assistantId,
                 role: 'assistant',
+                agent_id: 'Orchestrator',
                 agent_name: BOT_NAME,
                 content: '暂时没有可展示的答复。',
-                sources: [],
-                confidence: 0,
+                sources: [{ kind: 'other', label: '无来源', ref: 'none' }],
+                confidence: 0.4,
                 createdAt: stamp,
                 completedAt,
                 deliveryStatus: 'complete',
@@ -842,16 +939,53 @@ function NativeChat({
     void send(chip.prompt)
   }
 
-  function onClear() {
-    if (!clearArmed) {
-      setClearArmed(true)
+  function onNewConversation() {
+    if (generating) stopGeneration()
+    clearAttachments()
+    setConversationState(createConversation())
+    setDrafts([])
+    setShowNewMsgHint(false)
+    setHistoryOpen(false)
+    setInput('')
+    setSyncNotice('')
+  }
+
+  function onToggleHistory() {
+    setHistoryOpen((open) => {
+      if (!open) setConversationList(listConversations())
+      return !open
+    })
+  }
+
+  function onSelectConversation(conversationId: string) {
+    if (conversationId === conversationRef.current.conversationId) {
+      setHistoryOpen(false)
       return
     }
     if (generating) stopGeneration()
-    setConversationState(clearConversation())
+    clearAttachments()
+    const next = switchConversation(conversationId)
+    if (!next) return
+    setConversationState(next)
     setDrafts([])
-    setClearArmed(false)
     setShowNewMsgHint(false)
+    setHistoryOpen(false)
+    setInput('')
+    setSyncNotice('')
+  }
+
+  function onDeleteConversation(conversationId: string) {
+    const deletingActive = conversationId === conversationRef.current.conversationId
+    if (generating && deletingActive) stopGeneration()
+    const next = deleteConversation(conversationId)
+    setConversationState(next)
+    if (deletingActive) {
+      clearAttachments()
+      setDrafts([])
+      setInput('')
+      setSyncNotice('')
+      setShowNewMsgHint(false)
+    }
   }
 
   function onComposerKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -890,16 +1024,82 @@ function NativeChat({
         )}
         <h1>销售 Copilot</h1>
         <div className="chat-screen__actions">
-          <button
-            type="button"
-            className={`chat-screen__clear${clearArmed ? ' is-armed' : ''}`}
-            onClick={onClear}
-            aria-label={clearArmed ? '再次点击确认清空对话' : '清空对话'}
-            title={clearArmed ? '再次点击确认清空' : '清空对话'}
+          <IconButton
+            className="chat-screen__action-btn"
+            squared
+            variant="ghost"
+            aria-label="新建对话"
+            title="新建对话"
+            onClick={onNewConversation}
           >
-            {clearArmed ? '确认清空' : '清空'}
-          </button>
+            <IconPlus />
+          </IconButton>
+          <IconButton
+            className={`chat-screen__action-btn chat-screen__history-toggle${historyOpen ? ' is-open' : ''}`}
+            squared
+            variant="ghost"
+            aria-label={historyOpen ? '收起对话列表' : '展开对话列表'}
+            aria-expanded={historyOpen}
+            title={historyOpen ? '收起对话列表' : '对话列表'}
+            onClick={onToggleHistory}
+          >
+            <IconChevronDown />
+          </IconButton>
         </div>
+        {historyOpen ? (
+          <div className="chat-history-panel" ref={historyPanelRef} role="listbox" aria-label="对话列表">
+            <div className="chat-history-panel__head">
+              <strong>对话列表</strong>
+              <span>{conversationList.length} 条</span>
+            </div>
+            {conversationList.length === 0 ? (
+              <p className="chat-history-panel__empty">还没有历史对话</p>
+            ) : (
+              <ul className="chat-history-panel__list">
+                {conversationList.map((item) => (
+                  <li key={item.conversationId}>
+                    <button
+                      type="button"
+                      className={`chat-history-panel__item${item.active ? ' is-active' : ''}`}
+                      role="option"
+                      aria-selected={item.active}
+                      onClick={() => onSelectConversation(item.conversationId)}
+                    >
+                      <span className="chat-history-panel__title">{item.title}</span>
+                      <span className="chat-history-panel__meta">
+                        {item.accountName ? (
+                          <span className="chat-history-panel__account">{item.accountName}</span>
+                        ) : null}
+                        <span>{formatConversationTime(item.updatedAt)}</span>
+                      </span>
+                      <span className="chat-history-panel__preview">{item.preview}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="chat-history-panel__delete"
+                      aria-label={`删除对话：${item.title}`}
+                      title="删除"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onDeleteConversation(item.conversationId)
+                      }}
+                    >
+                      <IconTrash />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <button
+              type="button"
+              className="chat-history-panel__new"
+              onClick={onNewConversation}
+            >
+              <IconPlus />
+              新建对话
+            </button>
+          </div>
+        ) : null}
       </header>
 
       {activeAccountName ? (
@@ -940,7 +1140,7 @@ function NativeChat({
               </ol>
             </div>
             <p className="chat-empty__hint">
-              输入问题、点快捷入口，或上传图片/文本附件。麦克风可切换语音输入。Enter 发送，Shift+Enter 换行。
+              语音优先：长按下方麦克风说话；点键盘可切回文字。也可点快捷入口或上传图片/文本附件（附件会尝试识别，复杂 OCR 不在 Demo 范围）。
               {webSearchEnabled
                 ? ' 已启用网页检索，可直接问公开政策或资料。'
                 : ' 通用问答可用；实时网页检索需在 server/.env 配置 WEB_SEARCH_API_KEY。'}
@@ -981,8 +1181,9 @@ function NativeChat({
                         ? `已停止 · ${formatMessageTime(m.completedAt || m.createdAt)}`
                         : formatMessageTime(m.completedAt || m.createdAt)
                   const showTimeRow = showTime || pending
-                  const showSourceRow = !isUser && m.sources.length > 0
+                  const showSourceRow = !isUser && !pending && !errored
                   const showFooter = showSourceRow || showTimeRow
+                  const hasFallbackStep = runSteps.some((step) => step.status === 'fallback')
 
                   return (
                     <div
@@ -999,10 +1200,20 @@ function NativeChat({
                             {m.agent_id && m.agent_id !== messageAgentName(m) ? (
                               <span className="chat-row__agent-id">{m.agent_id}</span>
                             ) : null}
+                            {!isUser && !pending ? (
+                              <span className="chat-row__ai-badge" title="AI 生成内容，写入前可编辑确认">
+                                AI 生成
+                              </span>
+                            ) : null}
+                            {hasFallbackStep ? (
+                              <span className="chat-row__degraded" title="本回合含规则兜底步骤">
+                                规则兜底
+                              </span>
+                            ) : null}
                           </div>
                           {pending ? (
                             <span className="chat-row__live" aria-live="polite">
-                              正在思考
+                              正在处理
                             </span>
                           ) : null}
                         </div>
@@ -1139,7 +1350,7 @@ function NativeChat({
                         <div className="chat-row__footer">
                           {showSourceRow ? (
                             <div className="chat-row__sources" aria-label="信息来源">
-                              <SourceChips sources={m.sources} />
+                              <SourceChips sources={m.sources} showEmpty />
                             </div>
                           ) : null}
                           {showTimeRow ? (

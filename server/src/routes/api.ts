@@ -1,8 +1,11 @@
 import { Router } from 'express'
 import {
+  activeLlmModelName,
   config,
   hasCopilotStudioConfig,
   hasDeepSeek,
+  hasLlm,
+  hasOpenAI,
   hasVisionModel,
   hasWebFetch,
   hasWebSearch,
@@ -33,10 +36,16 @@ export const apiRouter = Router()
 
 apiRouter.get('/health', async (_req, res) => {
   ensureAgentsRegistered()
+  const catalog = getCatalogSummary()
   res.json({
     ok: true,
     aiProvider: config.aiProvider,
     deepseek: hasDeepSeek(),
+    openai: hasOpenAI(),
+    llm: hasLlm(),
+    llmModel: hasLlm() ? activeLlmModelName() : undefined,
+    /** Key/config present — does not prove api.openai.com is reachable from this host. */
+    llmConfigured: hasLlm(),
     vision: hasVisionModel(),
     visionModel: hasVisionModel() ? config.visionModel : undefined,
     copilotstudio: hasCopilotStudioConfig(),
@@ -44,7 +53,12 @@ apiRouter.get('/health', async (_req, res) => {
     dataverseMode: repository.mode,
     promptVersion: config.promptVersion,
     accounts: (await repository.listAccounts()).length,
-    agents: getCatalogSummary().length,
+    agents: catalog.agents.length,
+    skills: catalog.skills.length,
+    note:
+      config.aiProvider === 'openai' && hasOpenAI()
+        ? 'openai=true 表示已配置 Key；若聊天仍规则兜底，多为无法访问 OPENAI_BASE_URL（需代理/网关）。'
+        : undefined,
     capabilities: {
       activityInsight: true,
       opportunityInsight: true,
@@ -55,9 +69,10 @@ apiRouter.get('/health', async (_req, res) => {
   })
 })
 
-/** Unified agent management entry — list registered Domain Agents. */
+/** Unified agent management entry — Domain Agents + IntentRouter skills. */
 apiRouter.get('/agents', (_req, res) => {
-  res.json({ agents: getCatalogSummary() })
+  const catalog = getCatalogSummary()
+  res.json({ agents: catalog.agents, skills: catalog.skills })
 })
 
 async function handleOrchestrate(req: import('express').Request, res: import('express').Response, useCopilotStudio = false) {
@@ -295,10 +310,6 @@ apiRouter.post('/drafts/:key/discard', async (req, res) => {
   res.json(draft)
 })
 
-apiRouter.get('/metrics', async (_req, res) => {
-  res.json(await repository.computeMetrics())
-})
-
 apiRouter.get('/opportunities', async (_req, res) => {
   const opportunities = await repository.listOpportunities()
   const items = await Promise.all(opportunities.map(async (opp) => {
@@ -414,6 +425,42 @@ apiRouter.get('/orders', async (req, res) => {
 
 apiRouter.get('/logs', async (_req, res) => {
   res.json({ logs: await repository.listLogs(50) })
+})
+
+/** Aggregate invocation metrics by promptVersion / agent / success. */
+apiRouter.get('/metrics', async (_req, res) => {
+  const logs = await repository.listLogs(200)
+  const byPrompt = new Map<string, { count: number; success: number; latencyMs: number }>()
+  const byAgent = new Map<string, { count: number; success: number; fallback: number }>()
+  for (const log of logs) {
+    const pv = log.promptVersion || 'unknown'
+    const promptRow = byPrompt.get(pv) || { count: 0, success: 0, latencyMs: 0 }
+    promptRow.count += 1
+    if (log.success) promptRow.success += 1
+    promptRow.latencyMs += log.latencyMs || 0
+    byPrompt.set(pv, promptRow)
+
+    const agentRow = byAgent.get(log.agentName) || { count: 0, success: 0, fallback: 0 }
+    agentRow.count += 1
+    if (log.success) agentRow.success += 1
+    if (log.fallbackReason) agentRow.fallback += 1
+    byAgent.set(log.agentName, agentRow)
+  }
+  const business = await repository.computeMetrics()
+  res.json({
+    invocationCount: logs.length,
+    byPromptVersion: Object.fromEntries(
+      [...byPrompt.entries()].map(([key, value]) => [
+        key,
+        {
+          ...value,
+          avgLatencyMs: value.count ? Math.round(value.latencyMs / value.count) : 0,
+        },
+      ]),
+    ),
+    byAgent: Object.fromEntries(byAgent),
+    business,
+  })
 })
 
 apiRouter.get('/conversations/:sessionKey', async (req, res) => {

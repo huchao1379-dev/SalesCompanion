@@ -42,10 +42,21 @@ export function AppShell() {
   const [chatSeed, setChatSeed] = useState('')
   const [chatKey, setChatKey] = useState(0)
   const [activityItem, setActivityItem] = useState<AgendaItem | null>(null)
+  /** Stable per open — must NOT change when drafts are saved, or capture remounts onto 确认. */
+  const [captureSession, setCaptureSession] = useState(0)
+  const [captureStartConfirm, setCaptureStartConfirm] = useState(false)
 
   function goScreen(next: ScreenId) {
     setScreen(next)
     if (next !== 'home') setInsightsOpen(false)
+  }
+
+  function openCapture(opts?: { accountRef?: string; resetDrafts?: boolean }) {
+    if (opts?.accountRef) setAccountKey(opts.accountRef)
+    if (opts?.resetDrafts !== false) setSeedDrafts([])
+    setCaptureStartConfirm(false)
+    setCaptureSession((n) => n + 1)
+    goScreen('capture')
   }
 
   function openOpportunityDetail(id: string) {
@@ -55,7 +66,13 @@ export function AppShell() {
 
   function openDraft(draft: DraftPayload) {
     setSeedDrafts([draft])
-    goScreen(draft.kind === 'opportunity' ? 'opportunity' : 'capture')
+    if (draft.kind === 'opportunity') {
+      goScreen('opportunity')
+      return
+    }
+    setCaptureStartConfirm(true)
+    setCaptureSession((n) => n + 1)
+    goScreen('capture')
   }
 
   function openActivity(item: AgendaItem) {
@@ -112,7 +129,7 @@ export function AppShell() {
         <HomeDashboard
           dimmed={insightsOpen}
           onOpenBrief={openBrief}
-          onOpenCapture={() => goScreen('capture')}
+          onOpenCapture={() => openCapture()}
           onOpenChat={() => openChat()}
           onOpenTasks={() => goScreen('tasks')}
           onOpenOpportunity={() => goScreen('opportunity')}
@@ -137,20 +154,16 @@ export function AppShell() {
         >
           {screen === 'tasks' ? (
             <TasksHub
-              onOpenCapture={() => goScreen('capture')}
+              onOpenCapture={() => openCapture()}
               onOpenOpportunity={() => goScreen('opportunity')}
               onOpenDraft={openDraft}
             />
           ) : null}
           {screen === 'capture' ? (
             <ActivityCapture
-              key={
-                seedDrafts
-                  .filter((d) => d.kind === 'activity')
-                  .map((d) => d.idempotencyKey)
-                  .join('|') || 'capture-new'
-              }
+              key={`capture-${captureSession}`}
               initialDrafts={seedDrafts.filter((d) => d.kind === 'activity')}
+              startAtConfirm={captureStartConfirm}
               accountKey={accountKey}
               onBack={() => goScreen('home')}
               onAccountChange={setAccountKey}
@@ -182,7 +195,7 @@ export function AppShell() {
             <OpportunityDraftScreen
               seedDrafts={seedDrafts}
               onBack={() => goScreen('home')}
-              onOpenCapture={() => goScreen('capture')}
+              onOpenCapture={() => openCapture()}
               onOpenDetail={openOpportunityDetail}
             />
           ) : null}
@@ -194,10 +207,7 @@ export function AppShell() {
                 (d): d is OpportunityDraftPayload => d.kind === 'opportunity',
               )}
               onBack={() => goScreen('opportunity')}
-              onOpenCapture={(key) => {
-                if (key) setAccountKey(key)
-                goScreen('capture')
-              }}
+              onOpenCapture={(key) => openCapture({ accountRef: key })}
               onOpenAccount={(key) => {
                 setAccountKey(key)
                 goScreen('account')
@@ -212,7 +222,7 @@ export function AppShell() {
               onBack={() =>
                 goScreen(opportunityId ? 'opportunity-detail' : activityItem ? 'activity' : 'chat')
               }
-              onCapture={() => goScreen('capture')}
+              onCapture={() => openCapture({ accountRef: accountKey, resetDrafts: true })}
               onOpenOpportunity={(id) => {
                 if (id) openOpportunityDetail(id)
                 else goScreen('opportunity')
@@ -243,7 +253,7 @@ export function AppShell() {
           mode={dockMode}
           draft={copilotDraft}
           onDraftChange={setCopilotDraft}
-          onOpenCapture={() => goScreen('capture')}
+          onOpenCapture={() => openCapture()}
           onOpenOpportunity={() => goScreen('opportunity')}
           onOpenBrief={openBrief}
           onOpenChat={openChat}

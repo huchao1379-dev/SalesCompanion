@@ -1,8 +1,10 @@
 import {
   chatWithTools,
-  hasDeepSeek,
+  hasLlm,
+  llmSuccessMode,
   parseStructuredJson,
 } from '../llm/deepseek.js'
+import type { LlmSuccessMode } from '../llm/types.js'
 import { orderQueryOutputSchema } from '../llm/schemas.js'
 import type {
   AccountRecord,
@@ -200,7 +202,7 @@ export async function queryOrderLogistics(
   utterance: string,
   knownAccountId?: string,
   knownAccountName?: string,
-): Promise<{ message: AgentMessage; mode: 'deepseek' | 'heuristic' }> {
+): Promise<{ message: AgentMessage; mode: LlmSuccessMode | 'heuristic' }> {
   let fallback: AgentMessage
   try {
     const facts = await resolveOrderFacts(utterance, knownAccountId, knownAccountName)
@@ -241,12 +243,12 @@ export async function queryOrderLogistics(
       createdAt: new Date().toISOString(),
     }
   }
-  if (!hasDeepSeek() || fallback.confidence < 0.5 || fallback.sources.length === 0) {
+  if (!hasLlm() || fallback.confidence < 0.5 || fallback.sources.length === 0) {
     return { message: fallback, mode: 'heuristic' }
   }
 
   try {
-    const { finalText, toolResults } = await chatWithTools({
+    const { finalText, toolResults, mode } = await chatWithTools({
       system: `${ORDER_QUERY_SYSTEM}\n\n${ORDER_QUERY_TOOL_ADDENDUM}`,
       user: JSON.stringify({
         question: utterance,
@@ -264,7 +266,7 @@ export async function queryOrderLogistics(
     const facts = orderLogisticsToolResultSchema.parse(rawFacts)
     const output = parseStructuredJson(finalText, orderQueryOutputSchema)
     return {
-      mode: 'deepseek',
+      mode: mode || llmSuccessMode(),
       message: {
         ...messageFromFacts(utterance, facts),
         content: output.answer,

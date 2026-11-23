@@ -1,4 +1,4 @@
-import { chatStructured, hasDeepSeek } from '../llm/deepseek.js'
+import { chatStructured, hasLlm } from '../llm/deepseek.js'
 import { extractVisitOutputSchema } from '../llm/schemas.js'
 import type { ExtractedVisit } from '../types.js'
 import type { ConversationTurn } from './agentTypes.js'
@@ -32,9 +32,9 @@ function compactHistory(history: ConversationTurn[] = []) {
 export async function extractVisit(
   utterance: string,
   options: ExtractOptions = {},
-): Promise<{ extracted: ExtractedVisit; mode: 'deepseek' | 'heuristic' }> {
+): Promise<{ extracted: ExtractedVisit; mode: 'deepseek' | 'openai' | 'heuristic' }> {
   const now = options.now ?? new Date()
-  if (hasDeepSeek()) {
+  if (hasLlm()) {
     try {
       const { data, mode } = await chatStructured({
         system: EXTRACT_SYSTEM,

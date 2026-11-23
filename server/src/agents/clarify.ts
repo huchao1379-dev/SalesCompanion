@@ -1,4 +1,5 @@
-import { chatStructured, hasDeepSeek } from '../llm/deepseek.js'
+import { chatStructured, hasLlm } from '../llm/deepseek.js'
+import { formatLlmTransportError } from '../llm/errors.js'
 import { clarifyOutputSchema } from '../llm/schemas.js'
 import type { AgentMessage, MessageUiBlock } from '../types.js'
 import type { ConversationTurn } from './agentTypes.js'
@@ -95,12 +96,19 @@ export function heuristicClarify(utterance: string, opts?: ClarifyOptions): Agen
     })
   }
 
-  if (focus === 'greeting' || (/你好|嗨|在吗|hello|hi\b/i.test(lower) && t.length < 12)) {
+  if (
+    focus === 'greeting' ||
+    /你是谁|你叫什么|介绍一下你自己|who are you/i.test(t) ||
+    (/你好|嗨|在吗|hello|hi\b/i.test(lower) && t.length < 12)
+  ) {
     return makeClarifyMessage({
-      reply: '你好，我是销售 Copilot。可以录入拜访、查客户/订单，也能写话术邮件或检索公开资料。',
+      reply:
+        /你是谁|你叫什么|介绍一下你自己|who are you/i.test(t)
+          ? '我是销售 Copilot，面向一线销售的 CRM 助手：可录入拜访草稿、查客户画像/订单物流、写工作小结，也能帮写话术/邮件；配置联网后还可检索公开资料。'
+          : '你好，我是销售 Copilot。可以录入拜访、查客户/订单，也能写话术邮件或检索公开资料。',
       question: '今天想先做哪件事？',
       examples: ['帮我写今日工作小结', 'Hospital Beta 最新进度怎么样', '监护仪开场话术怎么讲'],
-      confidence: 0.76,
+      confidence: 0.84,
       focus: 'greeting',
     })
   }
@@ -194,9 +202,13 @@ export function heuristicClarify(utterance: string, opts?: ClarifyOptions): Agen
 export async function buildClarifyReply(
   utterance: string,
   opts?: ClarifyOptions,
-): Promise<{ message: AgentMessage; mode: 'deepseek' | 'heuristic' }> {
+): Promise<{
+  message: AgentMessage
+  mode: 'deepseek' | 'openai' | 'heuristic'
+  llmError?: string
+}> {
   const fallback = heuristicClarify(utterance, opts)
-  if (!hasDeepSeek()) return { message: fallback, mode: 'heuristic' }
+  if (!hasLlm()) return { message: fallback, mode: 'heuristic' }
 
   try {
     const { data, mode } = await chatStructured({
@@ -250,7 +262,11 @@ export async function buildClarifyReply(
         },
       },
     }
-  } catch {
-    return { message: fallback, mode: 'heuristic' }
+  } catch (error) {
+    return {
+      message: fallback,
+      mode: 'heuristic',
+      llmError: formatLlmTransportError(error),
+    }
   }
 }

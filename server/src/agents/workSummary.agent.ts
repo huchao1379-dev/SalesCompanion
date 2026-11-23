@@ -10,7 +10,8 @@
 import type { DomainAgent } from './agentTypes.js'
 import type { ActivityDraft, MessageUiBlock } from '../types.js'
 import * as tools from '../tools/dataverseTools.js'
-import { chatStructured, hasDeepSeek } from '../llm/deepseek.js'
+import { chatStructured, hasLlm } from '../llm/deepseek.js'
+import type { LlmSuccessMode } from '../llm/types.js'
 import { workSummaryOutputSchema } from '../llm/schemas.js'
 import { WORK_SUMMARY_SYSTEM } from './prompts.js'
 import { addDays, isoDateInZone, toIsoDate, todayIsoDate, zonedParts } from '../util/datetime.js'
@@ -24,7 +25,7 @@ function dateRangeForWeekly(now = new Date()) {
 export const workSummaryAgent: DomainAgent = {
   name: 'WorkSummary',
   displayName: '工作总结 Agent',
-  description: '根据今日/本周活动草稿生成结构化工作总结（DeepSeek 或启发式）',
+  description: '根据今日/本周活动草稿生成结构化工作总结（LLM 或启发式）',
   intents: ['work_summary'],
   async run(ctx) {
     const allDrafts = (await tools.listActivityDrafts()).filter(
@@ -84,14 +85,14 @@ export const workSummaryAgent: DomainAgent = {
 
     let content: string
     let sections: NonNullable<MessageUiBlock['sections']>
-    let mode: 'deepseek' | 'heuristic' = 'heuristic'
+    let mode: LlmSuccessMode | 'heuristic' = 'heuristic'
     let confidence = 0.8
 
     const fallback = heuristicSummary(ctx.utterance, list, weekly)
     content = fallback.content
     sections = fallback.sections
 
-    if (hasDeepSeek()) {
+    if (hasLlm()) {
       try {
         const { data, mode: m } = await chatStructured({
           system: WORK_SUMMARY_SYSTEM,

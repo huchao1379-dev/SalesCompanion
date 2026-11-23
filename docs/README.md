@@ -40,8 +40,9 @@
 | **14** | [**Demo 整体计划**](14-demo-plan.md) | 小型 Demo 权威计划 | **执行** |
 | **15** | [**Demo 范围矩阵**](15-demo-scope-matrix.md) | 必做/选做/不做 | **执行** |
 | 16 | [Agent 接入评审与达标计划](16-agent-integration-review-and-plan.md) | Agent 接入现状 / 提示词优化 / 实施计划 | 参考 |
-| 17 | [P0 整改实施记录](17-p0-implementation-notes.md) | 本轮已改内容 / UI / 验证 | **本轮已完成** |
+| 17 | [P0 整改实施记录](17-p0-implementation-notes.md) | P0 契约 / 督导 / 幂等 / UI | **已完成** |
 | 18 | [对话页 UI 迭代记录](18-ui-iteration.md) | 今日播报入口 / 输入框 / ContactCard | 参考 |
+| **19** | [**Agent/回复/UI 硬化**](19-agent-reply-ui-hardening.md) | Compose · Manifest · Prompt 分版 · 橙麦 | **本轮** |
 
 ## 按角色阅读路径
 
@@ -51,8 +52,8 @@
 2. [14 Demo 计划](14-demo-plan.md)  
 3. [13 Dataverse 建表](13-dataverse-table-spec.md)  
 4. [03 消息契约](03-agent-architecture.md) · [12 开工指南](12-phase1-build-guide.md)  
-5. [16 Agent 接入评审与达标计划](16-agent-integration-review-and-plan.md)（现状差距 / 提示词 / 实施顺序）  
-6. [17 P0 整改实施记录](17-p0-implementation-notes.md)（本轮改动与验证） 
+5. [19 Agent/回复/UI 硬化](19-agent-reply-ui-hardening.md)（Compose / Manifest / 橙麦 / 验收）  
+6. [17 P0 整改实施记录](17-p0-implementation-notes.md) · [16 历史评审](16-agent-integration-review-and-plan.md)（16 部分结论已过时，以 17+19 为准） 
 
 ### 产品 / 看愿景
 
@@ -69,9 +70,10 @@
 
 | 仓库现状 | 文档落点 |
 | --- | --- |
-| React 移动 UI（五屏 + mock） | [05](05-ui-screens.md) · [12](12-phase1-build-guide.md) · [15](15-demo-scope-matrix.md) |
-| Mock Orchestrator | 过渡；Demo 验收前换 DeepSeek（见 14） |
-| Dataverse 尚未建表 | [13](13-dataverse-table-spec.md) **必建** 5 张 + 种子 |
+| React 移动 UI（五屏 + 橙麦 Voice-First） | [05](05-ui-screens.md) · [19](19-agent-reply-ui-hardening.md) · [15](15-demo-scope-matrix.md) |
+| DeepSeek 自研 Orchestrator + Compose + Manifest | [03](03-agent-architecture.md) · [19](19-agent-reply-ui-hardening.md) |
+| Demo SoR = 种子内存库 | [15](15-demo-scope-matrix.md)；真实 Web API 后续轨 |
+| Dataverse 建表规格 | [13](13-dataverse-table-spec.md)（联调另轨） |
 | 生产 VT/SB/Copilot 文档 | 保留作接轨；**当前不做** |
 
 ## 提案原文

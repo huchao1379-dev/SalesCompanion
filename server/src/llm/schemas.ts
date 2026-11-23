@@ -6,6 +6,7 @@ export const intentOutputSchema = z.object({
   intent: z.enum([
     'capture_visit',
     'query_account',
+    'list_accounts',
     'query_order',
     'work_summary',
     'general_assist',
@@ -148,7 +149,7 @@ export const activityInsightOutputSchema = z.object({
   actions: z.array(insightActionSchema).max(5).default([]),
   evidence: insightEvidenceSchema,
   updatedAt: z.string().min(1),
-  mode: z.enum(['deepseek', 'heuristic', 'copilotstudio']),
+  mode: z.enum(['deepseek', 'openai', 'heuristic', 'copilotstudio']),
   agentName: z.string().min(1).default('活动洞察 Agent'),
   /** @deprecated Prefer evidence.*; kept for brief compatibility. */
   opportunityCount: z.number().int().min(0).optional(),
@@ -174,7 +175,7 @@ export const opportunityInsightOutputSchema = z.object({
   actions: z.array(insightActionSchema).max(5).default([]),
   evidence: opportunityInsightEvidenceSchema,
   updatedAt: z.string().min(1),
-  mode: z.enum(['deepseek', 'heuristic', 'copilotstudio']),
+  mode: z.enum(['deepseek', 'openai', 'heuristic', 'copilotstudio']),
   agentName: z.string().min(1).default('商机洞察 Agent'),
   visitCount: z.number().int().min(0).optional(),
   missingFieldCount: z.number().int().min(0).optional(),

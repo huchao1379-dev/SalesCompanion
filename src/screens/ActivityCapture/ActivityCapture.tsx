@@ -18,6 +18,8 @@ import {
   IconSpark,
   IconStop,
 } from '../../components/DashIcons'
+import { AiSummaryContent } from '../../components/AiSummaryContent'
+import { AiSummaryModal } from '../../components/AiSummaryModal'
 import { DraftCard } from '../../components/DraftCard'
 import { MicButton } from '../../components/MicButton'
 import { ScreenHeader } from '../../components/ScreenHeader'
@@ -43,6 +45,8 @@ import { useWebSpeech } from '../../speech/useWebSpeech'
 
 type Props = {
   initialDrafts?: DraftPayload[]
+  /** Only true when opening an existing draft from任务中心 — not for「新建拜访」. */
+  startAtConfirm?: boolean
   accountKey?: string
   onBack?: () => void
   onDraftsCommitted?: (drafts: DraftPayload[]) => void
@@ -70,53 +74,88 @@ const STEPS = [
   { key: 'confirm', label: '确认' },
 ] as const
 
-function buildAiSummaryText(res: OrchestratorResponse): string {
+function hasBulletLines(text: string) {
+  return /^(?:[-*•]|\d+[.)、])\s+/m.test(text)
+}
+
+function toBulletSummary(lines: Array<{ label: string; value: string }>) {
+  return lines
+    .filter((row) => row.value.trim())
+    .map((row) => `- **${row.label}**：${row.value.trim()}`)
+    .join('\n')
+}
+
+/** Prefer a concise, bulleted summary of what the user said — not a field dump. */
+function buildAiSummaryText(res: OrchestratorResponse, originalUtterance: string): string {
+  const original = originalUtterance.trim()
   const activity = res.drafts.find((d) => d.kind === 'activity')
   const opportunity = res.drafts.find((d) => d.kind === 'opportunity')
-  const sections: string[] = []
-
-  if (activity && activity.kind === 'activity') {
-    const lines = [
-      `拜访摘要：${activity.summary || activity.subject || '（待补充）'}`,
-      activity.accountName ? `客户：${activity.accountName}` : null,
-      activity.contactName && activity.contactName !== '待补充'
-        ? `联系人：${activity.contactName}`
-        : null,
-      activity.visitType ? `类型：${activity.visitType}` : null,
-      activity.followUpAt ? `跟进：${activity.followUpAt.slice(0, 10)}` : null,
-    ].filter(Boolean)
-    sections.push(lines.join('\n'))
-  }
-
-  if (opportunity && opportunity.kind === 'opportunity') {
-    const qty = opportunity.quantity > 0 ? ` × ${opportunity.quantity}` : ''
-    sections.push(
-      [
-        `商机意向：${opportunity.name || opportunity.productLine || '（待补充）'}`,
-        opportunity.productLine
-          ? `产品：${opportunity.productLine}${opportunity.productModel ? ` ${opportunity.productModel}` : ''}${qty}`
-          : null,
-        opportunity.stage ? `阶段：${opportunity.stage}` : null,
-      ]
-        .filter(Boolean)
-        .join('\n'),
-    )
-  }
 
   const assistantText = res.messages
     .filter((m) => m.role === 'assistant' && m.content.trim())
     .map((m) => m.content.trim())
     .join('\n\n')
 
+  // Prefer structured field bullets from drafts first (stable, highlightable labels)
+  const rows: Array<{ label: string; value: string }> = []
+  if (activity && activity.kind === 'activity') {
+    if (activity.accountName && activity.accountName !== '待补充') {
+      rows.push({ label: '客户', value: activity.accountName })
+    }
+    if (activity.contactName && activity.contactName !== '待补充') {
+      rows.push({ label: '联系人', value: activity.contactName })
+    }
+    if (opportunity && opportunity.kind === 'opportunity') {
+      const product = [opportunity.productLine, opportunity.productModel].filter(Boolean).join(' ')
+      if (product) rows.push({ label: '诉求/产品', value: product })
+    }
+    if (activity.summary && activity.summary !== original) {
+      rows.push({ label: '结果', value: activity.summary })
+    }
+    if (activity.followUpAt) {
+      rows.push({ label: '跟进', value: activity.followUpAt.slice(0, 10) })
+    }
+  } else if (opportunity && opportunity.kind === 'opportunity') {
+    const product = [opportunity.productLine, opportunity.productModel].filter(Boolean).join(' ')
+    if (product) rows.push({ label: '诉求/产品', value: product })
+  }
+
+  // 1) Assistant narrative — keep if already bulleted / richer than field rows
   if (assistantText) {
-    sections.push(assistantText)
+    const cleaned = assistantText
+      .replace(/^(好的[，,]?|收到[，,]?|总结如下[：:]?\s*|AI\s*总结[：:]?\s*)/i, '')
+      .replace(/^【?拜访总结】?[：:]?\s*/i, '')
+      .trim()
+    if (cleaned && cleaned !== original) {
+      if (hasBulletLines(cleaned)) return cleaned
+      if (rows.length >= 2) return toBulletSummary(rows)
+      const sentences = cleaned
+        .split(/(?<=[。！？；\n])/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 5)
+      if (sentences.length >= 2) {
+        return sentences.map((s) => `- ${s.replace(/^[-*•]\s+/, '')}`).join('\n')
+      }
+      return rows.length ? toBulletSummary(rows) : `- ${cleaned}`
+    }
   }
 
-  if (!sections.length) {
-    return '暂未提取到可展示的总结。请用包含客户、联系人、产品与跟进时间的拜访口述再试。'
+  // 2) Activity summary grounded in the utterance
+  if (activity && activity.kind === 'activity') {
+    const summary = (activity.summary || '').trim()
+    if (summary && summary !== original && !rows.some((r) => r.label === '结果')) {
+      rows.push({ label: '结果', value: summary })
+    }
+  }
+  if (rows.length) return toBulletSummary(rows)
+
+  if (original) {
+    const short = original.length > 160 ? `${original.slice(0, 160)}…` : original
+    return `- **口述要点**：${short}`
   }
 
-  return sections.join('\n\n')
+  return '- **提示**：暂未提取到可展示的总结。请补充客户、联系人、产品与跟进时间后再试。'
 }
 
 const PHASE_COPY: Record<
@@ -125,7 +164,7 @@ const PHASE_COPY: Record<
 > = {
   idle: {
     title: '待机',
-    detail: '点击麦克风开始录音。转写内容会实时显示在上方区域。',
+    detail: '点击麦克风开始录音，或在内容区直接输入。保存前不会自动写入草稿。',
     tone: 'neutral',
   },
   recording: {
@@ -140,12 +179,12 @@ const PHASE_COPY: Record<
   },
   processing: {
     title: '处理中',
-    detail: 'AI 正在从转写中抽取拜访与商机字段，不确定项会标为「待补充」。',
+    detail: 'AI 正在根据您的口述生成总结，并抽取拜访与商机字段。',
     tone: 'busy',
   },
   transcript_ready: {
     title: '转写完成',
-    detail: '可直接点击内容区修改，或进行 AI 总结。',
+    detail: '可修改后点右下角「保存」进入确认；或先「AI 总结」再在弹窗中保存。',
     tone: 'ok',
   },
   recognition_failed: {
@@ -180,10 +219,12 @@ const PHASE_COPY: Record<
   },
 }
 
-function deriveStepIndex(phase: CapturePhase, hasDrafts: boolean, hasTranscript: boolean) {
-  if (hasDrafts || phase === 'submitting' || phase === 'sync_success' || phase === 'sync_failed') {
+/** Step 3 (确认) only after explicit Save — preview drafts from AI must not unlock it. */
+function deriveStepIndex(phase: CapturePhase, hasSaved: boolean, hasTranscript: boolean) {
+  if (phase === 'submitting' || phase === 'sync_success' || phase === 'sync_failed') {
     return 2
   }
+  if (hasSaved) return 2
   if (
     hasTranscript ||
     phase === 'transcript_ready' ||
@@ -202,6 +243,7 @@ function formatElapsed(seconds: number) {
 
 export function ActivityCapture({
   initialDrafts = [],
+  startAtConfirm = false,
   accountKey,
   onBack,
   onDraftsCommitted,
@@ -226,15 +268,17 @@ export function ActivityCapture({
   const [simulateFail, setSimulateFail] = useState(false)
   const [showDevTools, setShowDevTools] = useState(false)
   const [usedMockSync, setUsedMockSync] = useState(false)
-  const [savedHint, setSavedHint] = useState(false)
+  /** Explicit Save only — leftover seed drafts must not unlock 确认 for a new visit. */
+  const [savedHint, setSavedHint] = useState(() => Boolean(startAtConfirm && initialDrafts.length > 0))
   const [aiSummary, setAiSummary] = useState('')
-  const [viewStep, setViewStep] = useState(() => (initialDrafts.length > 0 ? 2 : 0))
+  const [summaryOriginal, setSummaryOriginal] = useState('')
+  const [summaryModalOpen, setSummaryModalOpen] = useState(false)
+  const [viewStep, setViewStep] = useState(() => (startAtConfirm && initialDrafts.length > 0 ? 2 : 0))
   const [offlinePending, setOfflinePending] = useState(
     () => listOfflineUtterances().filter((u) => !u.synced).length,
   )
   const recordStartedAt = useRef<number | null>(null)
   const pausedAccumulated = useRef(0)
-  const autoSaveTimer = useRef<number | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const contentAreaRef = useRef<HTMLTextAreaElement | null>(null)
 
@@ -291,7 +335,7 @@ export function ActivityCapture({
     ? [speech.transcript, speech.interimTranscript].filter(Boolean).join(' ')
     : ''
   const displayTranscript = speech.listening ? livePreview : transcriptEdit
-  const derivedStep = deriveStepIndex(phase, drafts.length > 0, Boolean(transcriptEdit.trim()))
+  const derivedStep = deriveStepIndex(phase, savedHint, Boolean(transcriptEdit.trim()))
   const stepIndex = viewStep
   const isConfirmStep = stepIndex === 2
   const busy = phase === 'processing' || phase === 'submitting' || phase === 'recording'
@@ -301,12 +345,16 @@ export function ActivityCapture({
   const hasContent = Boolean(displayTranscript.trim())
   const canOpenStep = (index: number) => {
     if (index <= 1) return true
-    return drafts.length > 0 || derivedStep >= 2
+    return savedHint
   }
 
-  /* Keep the visible step in sync when the flow advances forward. */
+  /* Auto-advance 口述→转写 only. Never jump to 确认 — user must tap the step after Save. */
   useEffect(() => {
-    setViewStep((prev) => (derivedStep > prev ? derivedStep : prev))
+    setViewStep((prev) => {
+      if (prev === 2 && derivedStep < 2) return Math.min(derivedStep, 1)
+      if (prev === 0 && derivedStep === 1) return 1
+      return prev
+    })
   }, [derivedStep])
 
   useEffect(() => {
@@ -314,19 +362,11 @@ export function ActivityCapture({
     setAccountPickerOpen(false)
   }, [isConfirmStep])
 
-  useEffect(() => {
-    return () => {
-      if (autoSaveTimer.current != null) {
-        window.clearTimeout(autoSaveTimer.current)
-      }
-    }
-  }, [])
-
   function goToStep(index: number) {
     if (!canOpenStep(index)) {
       setStatusDetail(
         index === 2
-          ? '请先完成 AI 总结并生成草稿后再进入确认'
+          ? '请先点「保存」写入内容后再进入确认'
           : '请先录音或录入转写内容后再查看转写步骤',
       )
       return
@@ -424,17 +464,35 @@ export function ActivityCapture({
       return
     }
 
+    // Open modal immediately — do not persist or unlock 确认 until user taps 保存.
     setPhase('processing')
+    setSavedHint(false)
+    setViewStep((prev) => (prev > 1 ? 1 : prev))
+    setAiSummary('')
+    setSummaryOriginal(trimmed)
+    setSummaryModalOpen(true)
     setStatusDetail(
       getOrchestratorMode() === 'deepseek'
-        ? 'DeepSeek 编排中…'
-        : '正在生成 AI 总结与草稿…',
+        ? 'DeepSeek 正在根据口述生成总结…'
+        : getOrchestratorMode() === 'openai'
+          ? 'OpenAI 正在根据口述生成总结…'
+          : '正在根据您的口述生成 AI 总结…',
     )
     try {
-      // Bias the capture page toward visit extraction even for short utterances.
-      const captureUtterance = /拜访|录入拜访|刚拜访/.test(trimmed)
-        ? trimmed
-        : `录入拜访：${trimmed}`
+      // Summarize what the user said; also extract drafts (held in memory until Save).
+      const captureUtterance = [
+        '你是销售拜访记录助手。请严格基于下列「用户口述」作答，禁止编造未提及的事实。',
+        '请完成：',
+        '1）用中文输出分点拜访总结（每行一条，必须以「- 」开头），概括用户说了什么；重要字段标签用 **加粗**，例如：',
+        '- **客户**：上海仁济医院',
+        '- **联系人**：王主任',
+        '- **诉求/产品**：监护仪 N17 试用',
+        '- **结果**：意向积极，待报价',
+        '- **跟进**：下周三回访',
+        '不要输出不分点的整段长文；只基于口述，缺项可省略该行。',
+        '2）抽取活动/商机草稿字段，不确定项标「待补充」。',
+        `用户口述：${trimmed}`,
+      ].join('\n')
       const res = await orchestrate({
         utterance: captureUtterance,
         locale: 'zh-CN',
@@ -444,27 +502,23 @@ export function ActivityCapture({
           : undefined,
       })
       const next = applyDuplicateHints(res.drafts)
-      next.forEach((d) => upsertDraft(d))
+      // Preview only — must not unlock 确认； localStorage write happens on explicit Save.
       setDrafts(next)
-      setTranscriptEdit(trimmed)
-      const summaryText = buildAiSummaryText(res)
+      const summaryText = buildAiSummaryText(res, trimmed)
       setAiSummary(summaryText)
+      setSummaryOriginal(trimmed)
+      setSummaryModalOpen(true)
       setPhase('transcript_ready')
+      setSavedHint(false)
+      setViewStep((prev) => (prev > 1 ? 1 : prev))
       if (next.length > 0) {
-        setStatusDetail(`AI 总结完成 · 已生成 ${next.length} 条草稿，请核对后确认同步`)
-        onDraftsCommitted?.(next)
+        setStatusDetail(`AI 总结完成 · 草稿预览 ${next.length} 条；点弹窗「保存」后才会进入确认`)
       } else {
-        setStatusDetail('AI 已返回说明，但未生成草稿。请按示例补充客户/产品信息后重试。')
+        setStatusDetail('AI 总结已生成。点弹窗「保存」替换输入内容后可进入确认。')
       }
-      // Scroll summary into view after paint.
-      window.requestAnimationFrame(() => {
-        document.getElementById('capture-ai-summary')?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'nearest',
-        })
-      })
     } catch (err) {
       setPhase('network_error')
+      setSummaryModalOpen(false)
       setStatusDetail(err instanceof Error ? err.message : '编排失败，请检查网络或后端服务')
     }
   }
@@ -498,6 +552,8 @@ export function ActivityCapture({
     setUsedMockSync(false)
     setSavedHint(false)
     setAiSummary('')
+    setSummaryOriginal('')
+    setSummaryModalOpen(false)
     if (!speech.supported) {
       setPhase('idle')
       setStatusDetail('当前环境不支持语音识别，请在内容区直接输入')
@@ -540,9 +596,9 @@ export function ActivityCapture({
     const finalText = text.trim() || transcriptEdit.trim()
     if (finalText) {
       setTranscriptEdit(finalText)
+      setSavedHint(false)
       setPhase('transcript_ready')
-      persistTranscript(finalText)
-      setStatusDetail('转写完成，可直接点击内容修改或进行 AI 总结')
+      setStatusDetail('转写完成，可修改后点「保存」，或进行 AI 总结')
     } else {
       setPhase('recognition_failed')
       setStatusDetail('未识别到有效语音，可在内容区手动补充')
@@ -558,9 +614,12 @@ export function ActivityCapture({
     setStatusDetail('已取消录音')
   }
 
-  function persistTranscript(raw: string, opts?: { quiet?: boolean }) {
+  function persistTranscript(raw: string) {
     const trimmed = raw.trim()
-    if (!trimmed) return
+    if (!trimmed) {
+      setStatusDetail('请先录入拜访内容再保存')
+      return
+    }
     const existing = drafts.find((d) => d.kind === 'activity')
     if (existing && existing.kind === 'activity') {
       const next: DraftPayload = {
@@ -600,27 +659,15 @@ export function ActivityCapture({
     }
     setSavedHint(true)
     setPhase('transcript_ready')
-    if (!opts?.quiet) {
-      setStatusDetail('内容已自动保存')
-    }
-  }
-
-  function scheduleAutoSave(value: string) {
-    if (autoSaveTimer.current != null) {
-      window.clearTimeout(autoSaveTimer.current)
-    }
-    autoSaveTimer.current = window.setTimeout(() => {
-      autoSaveTimer.current = null
-      persistTranscript(value, { quiet: true })
-    }, 500)
+    setStatusDetail('内容已保存。需要时可点顶部「确认」查看草稿')
   }
 
   function syncContentAreaHeight() {
     const el = contentAreaRef.current
     if (!el) return
     el.style.height = 'auto'
-    const maxPx = Math.min(window.innerHeight * 0.5, 22 * 16)
-    el.style.height = `${Math.min(Math.max(el.scrollHeight, 9 * 16), maxPx)}px`
+    const maxPx = Math.min(window.innerHeight * 0.36, 16 * 16)
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 5.75 * 16), maxPx)}px`
   }
 
   function handleContentChange(value: string) {
@@ -629,7 +676,40 @@ export function ActivityCapture({
     setSavedHint(false)
     if (value.trim() && phase !== 'processing' && phase !== 'submitting' && !isRecordingSession) {
       setPhase('transcript_ready')
-      scheduleAutoSave(value)
+    }
+    window.requestAnimationFrame(syncContentAreaHeight)
+  }
+
+  function applyAiSummaryToInput(summary: string) {
+    const next = summary.trim()
+    if (!next) return
+    setTranscriptEdit(next)
+    speech.setTranscript(next)
+    setAiSummary(next)
+    setSummaryModalOpen(false)
+    setPhase('transcript_ready')
+    // Modal「保存」= 用总结替换输入，并显式落库（不会在总结生成时自动保存）
+    const stamped = drafts.map((d) => {
+      if (d.kind !== 'activity') return { ...d, updatedAt: new Date().toISOString() }
+      return {
+        ...d,
+        transcript: next,
+        summary: next,
+        subject: d.subject || `拜访 · ${contextAccount?.accountName || '客户'}`,
+        accountRef: contextAccount?.accountRef || d.accountRef,
+        accountName: contextAccount?.accountName || d.accountName,
+        updatedAt: new Date().toISOString(),
+      }
+    })
+    if (stamped.length > 0) {
+      stamped.forEach((d) => upsertDraft(d))
+      setDrafts(stamped)
+      onDraftsCommitted?.(stamped)
+      setSavedHint(true)
+      setStatusDetail('已用 AI 总结替换输入并保存。可点顶部「确认」继续')
+    } else {
+      persistTranscript(next)
+      setStatusDetail('已用 AI 总结替换输入并保存。可点顶部「确认」继续')
     }
     window.requestAnimationFrame(syncContentAreaHeight)
   }
@@ -745,6 +825,8 @@ export function ActivityCapture({
     setTranscriptEdit('')
     setDrafts([])
     setAiSummary('')
+    setSummaryOriginal('')
+    setSummaryModalOpen(false)
     setUsedMockSync(false)
     setSavedHint(false)
     setAccountPickerOpen(false)
@@ -910,7 +992,7 @@ export function ActivityCapture({
                 ? `录音中 ${formatElapsed(elapsed)} · 可暂停或结束`
                 : phase === 'paused'
                   ? `已暂停 ${formatElapsed(elapsed)} · 可继续或结束`
-                  : '语音转写实时显示在下方，确认后再同步 SAP。'}
+                  : '转写显示在下方；点右下角「保存」才会写入。也可用「AI 总结」预览后再保存。'}
             </p>
           </div>
         </div>
@@ -969,26 +1051,19 @@ export function ActivityCapture({
               disabled={phase === 'processing' || phase === 'submitting'}
               onChange={(e) => handleContentChange(e.target.value)}
               onFocus={syncContentAreaHeight}
-              onBlur={() => {
-                if (transcriptEdit.trim()) persistTranscript(transcriptEdit, { quiet: true })
-              }}
             />
           )}
 
-          {aiSummary ? (
-            <div
-              id="capture-ai-summary"
-              className="capture-screen__ai-summary"
-              role="region"
-              aria-label="AI 总结结果"
-            >
-              <div className="capture-screen__ai-summary-head">
-                <span className="capture-screen__ai-summary-icon" aria-hidden>
-                  <IconSpark />
-                </span>
-                <strong>AI 总结结果</strong>
-              </div>
-              <p className="capture-screen__ai-summary-body">{aiSummary}</p>
+          {!isRecordingSession ? (
+            <div className="capture-screen__content-footer">
+              <button
+                type="button"
+                className={`btn btn--accent capture-screen__save-btn${savedHint ? ' is-saved' : ''}`}
+                disabled={contentLocked || !transcriptEdit.trim()}
+                onClick={() => persistTranscript(transcriptEdit)}
+              >
+                {savedHint ? '已保存' : '保存'}
+              </button>
             </div>
           ) : null}
         </div>
@@ -1076,18 +1151,18 @@ export function ActivityCapture({
             </span>
             <strong>AI 总结结果</strong>
           </div>
-          <p className="capture-screen__ai-summary-body">{aiSummary}</p>
+          <AiSummaryContent text={aiSummary} />
         </div>
       ) : null}
 
-      {phase === 'processing' ? (
+      {phase === 'processing' && !summaryModalOpen ? (
         <article className="capture-screen__ai is-busy" aria-live="polite">
           <span className="capture-screen__ai-icon" aria-hidden>
             <IconSpark />
           </span>
           <div className="capture-screen__ai-copy">
             <strong>AI 处理中</strong>
-            <p>{statusDetail || '正在抽取客户、联系人、产品与跟进时间…'}</p>
+            <p>{statusDetail || '正在根据口述生成总结…'}</p>
           </div>
         </article>
       ) : null}
@@ -1204,6 +1279,15 @@ export function ActivityCapture({
           当前编排模式：{getOrchestratorMode()}
         </p>
       </details>
+
+      <AiSummaryModal
+        open={summaryModalOpen}
+        original={summaryOriginal}
+        summary={aiSummary}
+        busy={phase === 'processing'}
+        onClose={() => setSummaryModalOpen(false)}
+        onSave={applyAiSummaryToInput}
+      />
     </section>
   )
 }

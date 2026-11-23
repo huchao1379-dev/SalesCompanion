@@ -74,9 +74,10 @@
 }
 
 .btn--accent {
-  background: var(--green);
+  /* Voice-First primary CTA (docs/03 · 05); success/Synced keep --green / --ok */
+  background: var(--accent, #f97316);
   border-color: transparent;
-  color: #053318;
+  color: #fff7ed;
   font-weight: 700;
 }
 

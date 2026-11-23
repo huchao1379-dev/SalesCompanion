@@ -38,7 +38,7 @@ npm run dev
 | B 客户速览 | 「仁济医院最近怎么样？」 |
 | C 订单物流（选做） | 「查一下仁济医院上个订单的物流」 |
 
-编排：**DeepSeek**（默认；有 Key 时启用，否则启发式兜底）；数据：**Dataverse 种子内存库**（`dataverse/seed/seed.json`）。
+编排：**DeepSeek**（默认）或 **OpenAI gpt-6-luna**（`AI_PROVIDER=openai`）；有 Key 时启用，否则启发式兜底。数据：**Dataverse 种子内存库**（`dataverse/seed/seed.json`）。
 
 > Copilot Studio 接入代码保留为可选路径（`AI_PROVIDER=copilotstudio` + 管理端配置），Demo 默认不使用，也不作为验收前提。
 
@@ -46,12 +46,32 @@ npm run dev
 
 | 变量 | 说明 |
 | --- | --- |
-| `DEEPSEEK_API_KEY` | 可选；不填则启发式 |
+| `AI_PROVIDER` | `deepseek`（默认）/ `openai` / `copilotstudio` |
+| `DEEPSEEK_API_KEY` | DeepSeek 路径；不填则启发式 |
 | `DEEPSEEK_MODEL` | 默认 `deepseek-chat` |
+| `OPENAI_API_KEY` | OpenAI 路径（`AI_PROVIDER=openai`） |
+| `OPENAI_MODEL` | 默认 `gpt-6-luna`（也接受 `gpt6-luna`） |
+| `OPENAI_REASONING_EFFORT` | `none` / `low`（默认）/ `medium` / `high` / `xhigh` / `max` |
+| `OPENAI_BASE_URL` | 默认 `https://api.openai.com`（走 `/v1/responses`） |
 | `DATAVERSE_URL` / `DATAVERSE_TOKEN` | 可选；不填用内存种子 |
 | `WEB_SEARCH_API_KEY` | 可选；通用助手实时网页检索（Serper/Tavily） |
 | `WEB_SEARCH_PROVIDER` | `serper`（默认）或 `tavily` |
 | `WEB_FETCH_ENABLED` | 可选；抓取 https 页面（有搜索 Key 时默认开启） |
+
+### 切换到 OpenAI gpt-6-luna
+
+在 `server/.env`：
+
+```bash
+AI_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-6-luna
+OPENAI_REASONING_EFFORT=low
+```
+
+重启 `server` 后，`GET /api/health` 应看到 `aiProvider:"openai"`、`openai:true`、`llmModel:"gpt-6-luna"`。聊天 / 洞察仍走同一套 Orchestrator，底层改为 OpenAI Responses API。
+
+> **注意：** `openai:true` 只表示 Key 已配置，不保证本机能访问 `api.openai.com`。若聊天条出现「规则兜底」且步骤摘要含连接超时，请走可访问 OpenAI 的代理，或把 `OPENAI_BASE_URL` 改成你们的兼容网关（仍调用 `/v1/responses`）。
 
 Demo 默认不依赖 Copilot Studio / AI Builder；Copilot Studio 连接保留为可选路径（显式 `AI_PROVIDER=copilotstudio` 才启用）。
 

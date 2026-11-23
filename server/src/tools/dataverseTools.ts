@@ -20,6 +20,10 @@ export function searchAccounts(query: string): Promise<AccountRecord[]> {
   return repository.searchAccounts(query)
 }
 
+export function listAccounts(): Promise<AccountRecord[]> {
+  return repository.listAccounts()
+}
+
 export function getAccount(idOrKey: string): Promise<AccountRecord | undefined> {
   return repository.getAccount(idOrKey)
 }

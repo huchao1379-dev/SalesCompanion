@@ -1,14 +1,22 @@
 import { ApiRequestError, api } from '../api/client'
 import type { OrchestratorRequest, OrchestratorResponse } from './types'
 
-let lastMode: 'deepseek' | 'heuristic' | 'mixed' | 'copilotstudio' | 'offline-mock' = 'offline-mock'
+let lastMode: 'deepseek' | 'openai' | 'heuristic' | 'mixed' | 'copilotstudio' | 'offline-mock' =
+  'offline-mock'
 let apiReachable: boolean | null = null
 
 export async function pingOrchestrator(): Promise<boolean> {
   try {
     const h = await api.health()
     apiReachable = true
-    lastMode = h.aiProvider === 'copilotstudio' ? 'copilotstudio' : h.deepseek ? 'deepseek' : 'heuristic'
+    lastMode =
+      h.aiProvider === 'copilotstudio'
+        ? 'copilotstudio'
+        : h.aiProvider === 'openai' && h.openai
+          ? 'openai'
+          : h.deepseek
+            ? 'deepseek'
+            : 'heuristic'
     return true
   } catch {
     apiReachable = false
@@ -32,7 +40,7 @@ export async function orchestrate(
 ): Promise<OrchestratorResponse> {
   try {
     const res = (await api.orchestrate(req, { signal: opts?.signal })) as OrchestratorResponse & {
-      mode?: 'deepseek' | 'heuristic' | 'mixed' | 'copilotstudio'
+      mode?: 'deepseek' | 'openai' | 'heuristic' | 'mixed' | 'copilotstudio'
     }
     apiReachable = true
     lastMode = res.mode || 'heuristic'
