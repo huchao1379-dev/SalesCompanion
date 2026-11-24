@@ -3,7 +3,7 @@
  * 与 useWebSpeech 暴露同一 SpeechRecognitionState 契约。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api } from '../api/client'
+import { api, resolveIFlytekIatWsUrl } from '../api/client'
 import type { SpeechErrorKind, SpeechRecognitionState, StopOptions } from './types'
 
 const DEFAULT_GRACE_MS = 280
@@ -35,6 +35,8 @@ export function toIFlytekLanguage(lang?: string): string | undefined {
 
 type IatTicket = {
   url: string
+  wsMode?: 'proxy' | 'direct'
+  proxyPath?: string
   appId: string
   audio: {
     sampleRate: number
@@ -113,14 +115,31 @@ function pcmToBase64(pcm: Int16Array): string {
 
 function mapMediaError(err: unknown): { kind: SpeechErrorKind; message: string } {
   const name = err instanceof DOMException ? err.name : ''
+  const message = err instanceof Error ? err.message : ''
   if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
     return {
       kind: 'not-allowed',
       message: '麦克风权限被拒绝，请在系统设置中允许后重试，或改用键盘输入',
     }
   }
+  if (
+    name === 'SecurityError' ||
+    /operation is insecure|not allowed by this document|secure context/i.test(message)
+  ) {
+    return {
+      kind: 'not-allowed',
+      message:
+        '当前环境不允许使用麦克风（需 HTTPS，且宿主页须授权 microphone）。Power Apps 移动端请在系统设置允许麦克风，或用 Safari/Chrome 打开；也可改用键盘',
+    }
+  }
   if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
     return { kind: 'other', message: '未找到麦克风设备，请检查后重试或改用键盘' }
+  }
+  if (typeof window !== 'undefined' && !window.isSecureContext) {
+    return {
+      kind: 'not-allowed',
+      message: '非安全上下文无法录音，请使用 HTTPS 访问',
+    }
   }
   if (err instanceof Error && /ticket|503|讯飞|IFLYTEK|网络|fetch|Failed/i.test(err.message)) {
     return {
@@ -468,10 +487,24 @@ export function useIFlytekSpeech(): SpeechRecognitionState {
       setListeningState(true)
 
       try {
+        if (typeof window !== 'undefined' && !window.isSecureContext) {
+          throw new DOMException(
+            'The operation is insecure.',
+            'SecurityError',
+          )
+        }
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new DOMException(
+            'The operation is insecure.',
+            'SecurityError',
+          )
+        }
+
         const ticket = (await api.speechIatTicket()) as IatTicket
         if (!wantListeningRef.current || intentionalStopRef.current) return
         ticketRef.current = ticket
 
+        // 先拿麦：iOS WebView 常在此处抛 SecurityError，便于给出明确提示。
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             channelCount: 1,
@@ -515,7 +548,8 @@ export function useIFlytekSpeech(): SpeechRecognitionState {
         processor.connect(mute)
         mute.connect(ctx.destination)
 
-        const ws = new WebSocket(ticket.url)
+        const wsUrl = resolveIFlytekIatWsUrl(ticket)
+        const ws = new WebSocket(wsUrl)
         wsRef.current = ws
 
         ws.onopen = () => {

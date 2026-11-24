@@ -53,8 +53,15 @@ export function buildIFlytekIatAuthUrl(opts?: {
 
 export type IFlytekIatTicket = {
   provider: 'iflytek'
-  /** 短时有效的鉴权 WebSocket URL（含 signature，约 5 分钟内有效） */
+  /**
+   * 浏览器应连接的 WebSocket 地址。
+   * 默认走服务端代理路径（相对 `/api/...`），避免移动端 CSP/WebView 拦讯飞域名。
+   */
   url: string
+  /** proxy = 连自家 API；direct = 直连讯飞（仅调试） */
+  wsMode: 'proxy' | 'direct'
+  /** 相对 API 根的代理路径，如 `/speech/iat/ws`（配合 VITE_API_BASE） */
+  proxyPath: string
   appId: string
   host: string
   /** 推荐音频参数，供前端对齐 */
@@ -75,6 +82,9 @@ export type IFlytekIatTicket = {
   expiresAt: string
 }
 
+/** 相对 apiRouter 挂载点 `/api` 的路径 */
+export const IFLYTEK_IAT_PROXY_ROUTE = '/speech/iat/ws'
+
 export function issueIFlytekIatTicket(): IFlytekIatTicket {
   if (!hasIFlytek()) {
     throw new Error('讯飞语音未配置')
@@ -84,7 +94,10 @@ export function issueIFlytekIatTicket(): IFlytekIatTicket {
   const expiresAt = new Date(issuedAt.getTime() + 4 * 60 * 1000)
   return {
     provider: 'iflytek',
-    url: buildIFlytekIatAuthUrl(),
+    // 前端用 API_BASE 拼出 wss://你的API/api/speech/iat/ws；此处占位便于旧客户端兜底。
+    url: IFLYTEK_IAT_PROXY_ROUTE,
+    wsMode: 'proxy',
+    proxyPath: IFLYTEK_IAT_PROXY_ROUTE,
     appId: config.iflytekAppId,
     host: IAT_HOST,
     audio: {

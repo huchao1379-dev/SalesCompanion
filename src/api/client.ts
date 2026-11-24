@@ -30,6 +30,8 @@ type ApiHealth = {
 export type IFlytekIatTicket = {
   provider: 'iflytek'
   url: string
+  wsMode?: 'proxy' | 'direct'
+  proxyPath?: string
   appId: string
   host: string
   audio: {
@@ -47,6 +49,22 @@ export type IFlytekIatTicket = {
     vadEos: number
   }
   expiresAt: string
+}
+
+/** 把 HTTP(S) API_BASE 转成浏览器应连接的讯飞代理 WSS 地址。 */
+export function resolveIFlytekIatWsUrl(ticket: Pick<IFlytekIatTicket, 'url' | 'wsMode' | 'proxyPath'>) {
+  // 旧票据若仍下发讯飞直连 URL，则沿用（仅本地调试）。
+  if (ticket.wsMode === 'direct' || /^wss?:\/\//i.test(ticket.url)) {
+    return ticket.url
+  }
+  const path = ticket.proxyPath || ticket.url || '/speech/iat/ws'
+  const joined = path.startsWith('/') ? `${API_BASE}${path}` : `${API_BASE}/${path}`
+  if (/^https:\/\//i.test(joined)) return joined.replace(/^https/i, 'wss')
+  if (/^http:\/\//i.test(joined)) return joined.replace(/^http/i, 'ws')
+  // 相对路径：跟当前页面同源（本地 Vite 代理 / 同域部署）
+  if (typeof window === 'undefined') return joined
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${proto}//${window.location.host}${joined.startsWith('/') ? joined : `/${joined}`}`
 }
 
 let activityInsightCapability:

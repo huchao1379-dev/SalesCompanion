@@ -63,7 +63,7 @@ npm run dev
 
 ### 切换到讯飞语音识别
 
-架构：浏览器采 PCM → `GET /api/speech/iat/ticket` 取短时签票 → 直连 `wss://iat-api.xfyun.cn`（**APISecret 只留在服务端**）。
+架构：浏览器采 PCM → `GET /api/speech/iat/ticket` 取参数 → 经 **`wss://你的API/api/speech/iat/ws` 同源代理** 再连讯飞（**APISecret 只留在服务端**；移动端不必把 `iat-api.xfyun.cn` 写进 CSP）。
 
 1. 在[讯飞开放平台](https://console.xfyun.cn/)创建应用并开通 **语音听写（流式版）**，复制 AppID / APIKey / APISecret
 2. 若尚无 `server/.env`：`cd server && copy .env.example .env`（macOS/Linux 用 `cp`）
@@ -86,7 +86,23 @@ IFLYTEK_API_SECRET=你的APISecret
 6. 打开对话页 / 拜访录入，长按麦克风；隐私文案应显示「讯飞听写」
 7. 前端也可强制：根目录 `.env` 设 `VITE_SPEECH_PROVIDER=iflytek`（或 `webspeech`）后重启 Vite
 
-未配置讯飞密钥时自动回退浏览器 Web Speech（Chrome 国内常不稳定）。线上 Power Platform CSP 的 `connect-src` 需同时允许：你的 API 域名、以及 `wss://iat-api.xfyun.cn`。
+未配置讯飞密钥时自动回退浏览器 Web Speech（Chrome 国内常不稳定）。
+
+**线上移动端注意（Power Apps / 安卓 / iOS）：**
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| 安卓「讯飞语音连接失败」 | WebView/CSP 拦直连 `iat-api.xfyun.cn` | 已改为走 API 代理；CSP `connect-src` **只需**放行你的 API 的 `https:` + `wss:` |
+| iOS `The operation is insecure` | 无安全上下文或宿主未授权麦克风 | 系统设置允许麦克风；Power Apps 应用权限开启麦克风；或用 Safari/Chrome 打开同一 HTTPS 页 |
+| PC 正常、手机不行 | 桌面浏览器与移动 WebView 权限策略不同 | 重新构建发布前端 + 重启带 WSS 代理的 `server`；Nginx 需支持 WebSocket 升级 |
+
+CSP 示例：`connect-src https://api.你的域名.com wss://api.你的域名.com`（不必再加讯飞域名）。Nginx 反代需带：
+
+```nginx
+proxy_http_version 1.1;
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection "upgrade";
+```
 
 ### 切换到 OpenAI gpt-6-luna
 

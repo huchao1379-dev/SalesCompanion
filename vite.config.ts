@@ -17,6 +17,8 @@ export default defineConfig({
         target: 'http://127.0.0.1:8787',
         changeOrigin: true,
         secure: false,
+        // 讯飞听写代理：浏览器 → Vite → server /api/speech/iat/ws
+        ws: true,
       },
     },
   },

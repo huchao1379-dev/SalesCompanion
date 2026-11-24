@@ -1,5 +1,6 @@
 import cors from 'cors'
 import express from 'express'
+import http from 'node:http'
 import {
   activeLlmModelName,
   config,
@@ -11,6 +12,7 @@ import {
   resolveSpeechProvider,
 } from './config.js'
 import { apiRouter } from './routes/api.js'
+import { attachIFlytekIatProxy } from './speech/iflytekProxy.js'
 import { repository } from './store/dataverseStore.js'
 
 const app = express()
@@ -26,7 +28,10 @@ app.use('/api', (req, res) => {
   })
 })
 
-app.listen(config.port, config.host, () => {
+const server = http.createServer(app)
+attachIFlytekIatProxy(server)
+
+server.listen(config.port, config.host, () => {
   console.log(`[SalesCompanion API] http://${config.host}:${config.port}`)
   console.log(`  AI provider: ${config.aiProvider}`)
   if (config.aiProvider === 'openai') {
@@ -44,7 +49,7 @@ app.listen(config.port, config.host, () => {
     `  Vision: ${hasVisionModel() ? 'ON (' + config.visionModel + ')' : 'OFF → image attachments text-only notice'}`,
   )
   console.log(
-    `  Speech: ${resolveSpeechProvider()}${hasIFlytek() ? ' (讯飞已配置)' : ' (未配置讯飞 → Web Speech / 启发式)'}`,
+    `  Speech: ${resolveSpeechProvider()}${hasIFlytek() ? ' (讯飞已配置 + WSS 代理)' : ' (未配置讯飞 → Web Speech / 启发式)'}`,
   )
   console.log(`  Data repository: dataverse-webapi (${config.dataverseUrl})`)
 })
