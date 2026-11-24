@@ -58,6 +58,11 @@ export type IFlytekIatTicket = {
    * 默认走服务端代理路径（相对 `/api/...`），避免移动端 CSP/WebView 拦讯飞域名。
    */
   url: string
+  /**
+   * http = fetch+SSE（适配 Power Apps CSP 仅 https）；
+   * ws = WebSocket 代理（需 CSP 放行 wss://你的API）。
+   */
+  transport: 'http' | 'ws'
   /** proxy = 连自家 API；direct = 直连讯飞（仅调试） */
   wsMode: 'proxy' | 'direct'
   /** 相对 API 根的代理路径，如 `/speech/iat/ws`（配合 VITE_API_BASE） */
@@ -94,8 +99,9 @@ export function issueIFlytekIatTicket(): IFlytekIatTicket {
   const expiresAt = new Date(issuedAt.getTime() + 4 * 60 * 1000)
   return {
     provider: 'iflytek',
-    // 前端用 API_BASE 拼出 wss://你的API/api/speech/iat/ws；此处占位便于旧客户端兜底。
+    // 默认 HTTP：Power Apps connect-src 常只有 https://你的API，没有 wss://。
     url: IFLYTEK_IAT_PROXY_ROUTE,
+    transport: 'http',
     wsMode: 'proxy',
     proxyPath: IFLYTEK_IAT_PROXY_ROUTE,
     appId: config.iflytekAppId,

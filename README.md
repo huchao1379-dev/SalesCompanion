@@ -90,19 +90,23 @@ IFLYTEK_API_SECRET=你的APISecret
 
 **线上移动端注意（Power Apps / 安卓 / iOS）：**
 
+控制台若出现：
+
+`Refused to connect to 'wss://salescompanion.de1.net/...' ... connect-src https://salescompanion.de1.net ...`
+
+说明 **CSP 只放了 https，没放 wss**。当前默认已改走 **HTTPS 会话**（`/api/speech/iat/session` + SSE），与现有 `https://salescompanion.de1.net` 兼容，**不必再加 wss**。
+
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
-| 安卓「讯飞语音连接失败」 | WebView/CSP 拦直连 `iat-api.xfyun.cn` | 已改为走 API 代理；CSP `connect-src` **只需**放行你的 API 的 `https:` + `wss:` |
-| iOS `The operation is insecure` | 无安全上下文或宿主未授权麦克风 | 系统设置允许麦克风；Power Apps 应用权限开启麦克风；或用 Safari/Chrome 打开同一 HTTPS 页 |
-| PC 正常、手机不行 | 桌面浏览器与移动 WebView 权限策略不同 | 重新构建发布前端 + 重启带 WSS 代理的 `server`；Nginx 需支持 WebSocket 升级 |
+| 安卓「讯飞语音连接失败」+ CSP 拦 `wss://` | Power Apps 未放行 WebSocket | 部署含 HTTP 语音通道的新前后端；CSP 保留 `https://salescompanion.de1.net` 即可 |
+| iOS `The operation is insecure` | 宿主未授权麦克风 | 系统/Power Apps 开麦克风，或用 Safari 打开 |
+| 仍想用 WSS | 需改 CSP | 在 connect-src **额外**加 `wss://salescompanion.de1.net` |
 
-CSP 示例：`connect-src https://api.你的域名.com wss://api.你的域名.com`（不必再加讯飞域名）。Nginx 反代需带：
+你当前 CSP 建议保持：
 
-```nginx
-proxy_http_version 1.1;
-proxy_set_header Upgrade $http_upgrade;
-proxy_set_header Connection "upgrade";
-```
+`connect-src https://api.deepseek.com https://salescompanion.de1.net https://*.api.powerplatform.com https://*.api.powerplatformusercontent.com`
+
+（语音走 https，无需 `wss://salescompanion.de1.net`。）
 
 ### 切换到 OpenAI gpt-6-luna
 

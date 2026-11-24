@@ -3,8 +3,25 @@
  * 与 useWebSpeech 暴露同一 SpeechRecognitionState 契约。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, resolveIFlytekIatWsUrl } from '../api/client'
+import {
+  api,
+  preferIFlytekHttpTransport,
+  resolveIFlytekIatWsUrl,
+} from '../api/client'
 import type { SpeechErrorKind, SpeechRecognitionState, StopOptions } from './types'
+
+type IatLink = {
+  ready: boolean
+  send: (payload: Record<string, unknown>) => boolean
+  close: () => void
+}
+
+type IatServerPayload = {
+  code?: number
+  message?: string
+  ready?: boolean
+  data?: { status?: number; result?: IatWsResult }
+}
 
 const DEFAULT_GRACE_MS = 280
 const DEFAULT_SETTLE_MS = 2500
@@ -35,6 +52,7 @@ export function toIFlytekLanguage(lang?: string): string | undefined {
 
 type IatTicket = {
   url: string
+  transport?: 'http' | 'ws'
   wsMode?: 'proxy' | 'direct'
   proxyPath?: string
   appId: string
@@ -157,7 +175,6 @@ export function useIFlytekSpeech(): SpeechRecognitionState {
   const [supported] = useState(() =>
     typeof window !== 'undefined' &&
       Boolean(navigator.mediaDevices?.getUserMedia) &&
-      typeof WebSocket !== 'undefined' &&
       (typeof AudioContext !== 'undefined' ||
         typeof (window as unknown as { webkitAudioContext?: unknown }).webkitAudioContext !==
           'undefined'),
@@ -177,7 +194,7 @@ export function useIFlytekSpeech(): SpeechRecognitionState {
   const wantListeningRef = useRef(false)
   const intentionalStopRef = useRef(false)
   const listeningRef = useRef(false)
-  const wsRef = useRef<WebSocket | null>(null)
+  const linkRef = useRef<IatLink | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
   const processorRef = useRef<ScriptProcessorNode | null>(null)
@@ -324,14 +341,12 @@ export function useIFlytekSpeech(): SpeechRecognitionState {
       wantListeningRef.current = false
       clearGraceTimer()
       stopMicCapture()
-      const ws = wsRef.current
-      wsRef.current = null
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        try {
-          ws.close(1000)
-        } catch {
-          /* ignore */
-        }
+      const link = linkRef.current
+      linkRef.current = null
+      try {
+        link?.close()
+      } catch {
+        /* ignore */
       }
       setReady(false)
       setListeningState(false)
@@ -343,9 +358,9 @@ export function useIFlytekSpeech(): SpeechRecognitionState {
 
   const flushPcmFrame = useCallback(
     (status: 0 | 1 | 2) => {
-      const ws = wsRef.current
+      const link = linkRef.current
       const ticket = ticketRef.current
-      if (!ws || ws.readyState !== WebSocket.OPEN || !ticket) return false
+      if (!link?.ready || !ticket) return false
 
       let pcm: Int16Array
       if (status === 2) {
@@ -375,8 +390,8 @@ export function useIFlytekSpeech(): SpeechRecognitionState {
           vad_eos: ticket.business.vadEos || 3000,
         }
         if (ticket.business.dwa) business.dwa = ticket.business.dwa
-        ws.send(
-          JSON.stringify({
+        if (
+          !link.send({
             common: { app_id: ticket.appId },
             business,
             data: {
@@ -385,33 +400,37 @@ export function useIFlytekSpeech(): SpeechRecognitionState {
               encoding: ticket.audio.encoding,
               audio,
             },
-          }),
-        )
+          })
+        ) {
+          return false
+        }
         frameStatusRef.current = 1
       } else if (status === 2) {
-        ws.send(
-          JSON.stringify({
+        if (
+          !link.send({
             data: {
               status: 2,
               format: ticket.audio.format,
               encoding: ticket.audio.encoding,
               audio: '',
             },
-          }),
-        )
+          })
+        ) {
+          return false
+        }
         frameStatusRef.current = 2
         sessionEndedRef.current = true
-      } else {
-        ws.send(
-          JSON.stringify({
-            data: {
-              status: 1,
-              format: ticket.audio.format,
-              encoding: ticket.audio.encoding,
-              audio,
-            },
-          }),
-        )
+      } else if (
+        !link.send({
+          data: {
+            status: 1,
+            format: ticket.audio.format,
+            encoding: ticket.audio.encoding,
+            audio,
+          },
+        })
+      ) {
+        return false
       }
       return true
     },
@@ -469,22 +488,45 @@ export function useIFlytekSpeech(): SpeechRecognitionState {
       }
 
       stopMicCapture()
-      if (wsRef.current) {
-        const prev = wsRef.current
-        wsRef.current = null
-        // Drop handlers so a VAD slice rollover does not surface as a hard error.
-        prev.onopen = null
-        prev.onmessage = null
-        prev.onerror = null
-        prev.onclose = null
+      if (linkRef.current) {
+        const prev = linkRef.current
+        linkRef.current = null
         try {
-          prev.close(1000)
+          prev.close()
         } catch {
           /* ignore */
         }
       }
 
       setListeningState(true)
+
+      const handleServerPayload = (payload: IatServerPayload) => {
+        if (payload.code && payload.code !== 0) {
+          setErrorKind('other')
+          setError(`讯飞识别错误 ${payload.code}：${payload.message || 'unknown'}`)
+          finishSession()
+          return
+        }
+        if (payload.data?.result) applyIatResult(payload.data.result)
+        if (payload.data?.status === 2) {
+          if (settleResolverRef.current) {
+            finishSession()
+          } else if (wantListeningRef.current && !intentionalStopRef.current) {
+            void beginListeningRef.current(false)
+          }
+        }
+      }
+
+      const onLinkError = () => {
+        if (!wantListeningRef.current) return
+        if (settleResolverRef.current) {
+          finishSession()
+          return
+        }
+        setErrorKind('network')
+        setError('讯飞语音连接失败，请检查网络或密钥配置')
+        finishSession()
+      }
 
       try {
         if (typeof window !== 'undefined' && !window.isSecureContext) {
@@ -548,67 +590,102 @@ export function useIFlytekSpeech(): SpeechRecognitionState {
         processor.connect(mute)
         mute.connect(ctx.destination)
 
-        const wsUrl = resolveIFlytekIatWsUrl(ticket)
-        const ws = new WebSocket(wsUrl)
-        wsRef.current = ws
-
-        ws.onopen = () => {
+        if (preferIFlytekHttpTransport(ticket)) {
+          const session = await api.speechIatHttpOpen()
           if (!wantListeningRef.current || intentionalStopRef.current) {
-            ws.close()
+            void api.speechIatHttpClose(session.sessionId)
             return
           }
-          startPcmPump()
-        }
-
-        ws.onmessage = (event) => {
-          try {
-            const payload = JSON.parse(String(event.data)) as {
-              code?: number
-              message?: string
-              data?: { status?: number; result?: IatWsResult }
+          const events = new EventSource(api.speechIatHttpEventsUrl(session.sessionId))
+          let closed = false
+          const link: IatLink = {
+            ready: false,
+            send: (payload) => {
+              void api.speechIatHttpAudio(session.sessionId, payload).catch(() => {
+                if (!closed) onLinkError()
+              })
+              return true
+            },
+            close: () => {
+              if (closed) return
+              closed = true
+              events.close()
+              void api.speechIatHttpClose(session.sessionId)
+            },
+          }
+          linkRef.current = link
+          events.onmessage = (event) => {
+            try {
+              const payload = JSON.parse(String(event.data)) as IatServerPayload
+              if (payload.ready && linkRef.current === link) {
+                link.ready = true
+                if (!wantListeningRef.current || intentionalStopRef.current) {
+                  link.close()
+                  return
+                }
+                startPcmPump()
+                return
+              }
+              handleServerPayload(payload)
+            } catch {
+              /* ignore */
             }
-            if (payload.code && payload.code !== 0) {
-              setErrorKind('other')
-              setError(`讯飞识别错误 ${payload.code}：${payload.message || 'unknown'}`)
+          }
+          events.onerror = () => {
+            if (closed) return
+            onLinkError()
+          }
+        } else {
+          const wsUrl = resolveIFlytekIatWsUrl(ticket)
+          const ws = new WebSocket(wsUrl)
+          let closed = false
+          const link: IatLink = {
+            ready: false,
+            send: (payload) => {
+              if (ws.readyState !== WebSocket.OPEN) return false
+              ws.send(JSON.stringify(payload))
+              return true
+            },
+            close: () => {
+              if (closed) return
+              closed = true
+              try {
+                ws.close(1000)
+              } catch {
+                /* ignore */
+              }
+            },
+          }
+          linkRef.current = link
+          ws.onopen = () => {
+            if (!wantListeningRef.current || intentionalStopRef.current) {
+              link.close()
+              return
+            }
+            link.ready = true
+            startPcmPump()
+          }
+          ws.onmessage = (event) => {
+            try {
+              handleServerPayload(JSON.parse(String(event.data)) as IatServerPayload)
+            } catch {
+              /* ignore */
+            }
+          }
+          ws.onerror = () => {
+            if (closed) return
+            onLinkError()
+          }
+          ws.onclose = () => {
+            if (settleResolverRef.current) {
               finishSession()
               return
             }
-            if (payload.data?.result) applyIatResult(payload.data.result)
-            // data.status === 2 → engine finished this utterance / session slice
-            if (payload.data?.status === 2) {
-              if (settleResolverRef.current) {
-                finishSession()
-              } else if (wantListeningRef.current && !intentionalStopRef.current) {
-                // VAD ended a slice while user still holds — open a fresh IAT session.
-                void beginListeningRef.current(false)
-              }
+            if (!intentionalStopRef.current && wantListeningRef.current && !sessionEndedRef.current) {
+              setErrorKind('network')
+              setError('讯飞语音连接已断开')
+              finishSession()
             }
-          } catch {
-            /* ignore malformed */
-          }
-        }
-
-        ws.onerror = () => {
-          if (!wantListeningRef.current) return
-          if (settleResolverRef.current) {
-            finishSession()
-            return
-          }
-          setErrorKind('network')
-          setError('讯飞语音连接失败，请检查网络或密钥配置')
-          finishSession()
-        }
-
-        ws.onclose = () => {
-          if (settleResolverRef.current) {
-            finishSession()
-            return
-          }
-          // Ignore close during intentional restart/slice rollover.
-          if (!intentionalStopRef.current && wantListeningRef.current && !sessionEndedRef.current) {
-            setErrorKind('network')
-            setError('讯飞语音连接已断开')
-            finishSession()
           }
         }
       } catch (err) {
@@ -654,7 +731,7 @@ export function useIFlytekSpeech(): SpeechRecognitionState {
       const settleMs = opts?.settleMs ?? DEFAULT_SETTLE_MS
       const asPause = Boolean(opts?.pause)
 
-      if (!wsRef.current && !listeningRef.current && !wantListeningRef.current) {
+      if (!linkRef.current && !listeningRef.current && !wantListeningRef.current) {
         if (interimRef.current) {
           finalRef.current = joinTranscript(finalRef.current, interimRef.current)
           interimRef.current = ''
@@ -728,14 +805,12 @@ export function useIFlytekSpeech(): SpeechRecognitionState {
     clearSendTimer()
     settleResolverRef.current = null
     stopMicCapture()
-    const ws = wsRef.current
-    wsRef.current = null
-    if (ws) {
-      try {
-        ws.close(1000)
-      } catch {
-        /* ignore */
-      }
+    const link = linkRef.current
+    linkRef.current = null
+    try {
+      link?.close()
+    } catch {
+      /* ignore */
     }
     finalRef.current = ''
     interimRef.current = ''
@@ -756,7 +831,12 @@ export function useIFlytekSpeech(): SpeechRecognitionState {
       clearSendTimer()
       settleResolverRef.current = null
       stopMicCapture()
-      wsRef.current?.close()
+      try {
+        linkRef.current?.close()
+      } catch {
+        /* ignore */
+      }
+      linkRef.current = null
     }
   }, [clearGraceTimer, clearSendTimer, clearSettleTimer, stopMicCapture])
 

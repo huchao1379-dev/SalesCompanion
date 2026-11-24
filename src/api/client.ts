@@ -30,6 +30,8 @@ type ApiHealth = {
 export type IFlytekIatTicket = {
   provider: 'iflytek'
   url: string
+  /** http 走 fetch+SSE（CSP 只需 https）；ws 需额外放行 wss */
+  transport?: 'http' | 'ws'
   wsMode?: 'proxy' | 'direct'
   proxyPath?: string
   appId: string
@@ -49,6 +51,26 @@ export type IFlytekIatTicket = {
     vadEos: number
   }
   expiresAt: string
+}
+
+export type IFlytekIatHttpSession = {
+  sessionId: string
+  transport: 'http'
+  eventsPath: string
+  audioPath: string
+}
+
+function isPowerPlatformHost() {
+  if (typeof window === 'undefined') return false
+  return /\.powerplatformusercontent\.com$|\.powerapps\.com$/i.test(window.location.hostname)
+}
+
+/** Power Apps / 绝对 HTTPS API：优先 HTTP 语音，避免 CSP 未放行 wss。 */
+export function preferIFlytekHttpTransport(ticket?: Pick<IFlytekIatTicket, 'transport'>) {
+  if (ticket?.transport === 'ws') return false
+  if (ticket?.transport === 'http') return true
+  if (isPowerPlatformHost()) return true
+  return /^https:\/\//i.test(API_BASE)
 }
 
 /** 把 HTTP(S) API_BASE 转成浏览器应连接的讯飞代理 WSS 地址。 */
@@ -76,11 +98,6 @@ let opportunityInsightCapability:
   | { supported: boolean; expiresAt: number }
   | undefined
 let opportunityInsightCapabilityRequest: Promise<boolean> | undefined
-
-function isPowerPlatformHost() {
-  if (typeof window === 'undefined') return false
-  return /\.powerplatformusercontent\.com$|\.powerapps\.com$/i.test(window.location.hostname)
-}
 
 export class ApiRequestError extends Error {
   readonly kind: 'network' | 'http' | 'abort'
@@ -146,7 +163,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       detail: body || `API ${res.status}`,
     })
   }
-  return res.json() as Promise<T>
+  if (res.status === 204) return undefined as T
+  const text = await res.text()
+  if (!text) return undefined as T
+  return JSON.parse(text) as T
 }
 
 async function supportsActivityInsight(): Promise<boolean> {
@@ -231,7 +251,7 @@ type InsightApiResponse = {
 
 export const api = {
   health: () => request<ApiHealth>('/health'),
-  /** Short-lived 讯飞听写 WebSocket URL (APISecret stays on server). */
+  /** Short-lived 讯飞听写票据（参数 + 传输方式）。 */
   speechIatTicket: async () => {
     try {
       return await request<IFlytekIatTicket>('/speech/iat/ticket')
@@ -244,6 +264,24 @@ export const api = {
       }
       throw err
     }
+  },
+  /** HTTPS 会话：创建 → SSE 收结果 → POST 音频帧（适配仅 https 的 CSP）。 */
+  speechIatHttpOpen: () =>
+    request<IFlytekIatHttpSession>('/speech/iat/session', { method: 'POST', body: '{}' }),
+  speechIatHttpAudio: (sessionId: string, payload: unknown) =>
+    request<void>(`/speech/iat/session/${encodeURIComponent(sessionId)}/audio`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  speechIatHttpClose: (sessionId: string) =>
+    request<void>(`/speech/iat/session/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+    }).catch(() => undefined),
+  speechIatHttpEventsUrl: (sessionId: string) => {
+    const path = `/speech/iat/session/${encodeURIComponent(sessionId)}/events`
+    if (/^https?:\/\//i.test(API_BASE)) return `${API_BASE}${path}`
+    if (typeof window === 'undefined') return `${API_BASE}${path}`
+    return `${window.location.origin}${API_BASE}${path}`
   },
   supportsActivityInsight,
   supportsOpportunityInsight,

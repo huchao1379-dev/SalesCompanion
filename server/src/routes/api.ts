@@ -13,6 +13,7 @@ import {
   resolveSpeechProvider,
 } from '../config.js'
 import { issueIFlytekIatTicket } from '../speech/iflytek.js'
+import { mountIFlytekHttpSessionRoutes } from '../speech/iflytekHttpSession.js'
 import { CopilotStudioConfigurationError, copilotStudioOrchestrate } from '../copilotStudio.js'
 import { orchestrate } from '../orchestrator.js'
 import { repository } from '../store/dataverseStore.js'
@@ -96,6 +97,9 @@ apiRouter.get('/speech/iat/ticket', (_req, res) => {
     })
   }
 })
+
+/** HTTPS 会话代理（Power Apps CSP 通常只放行 https，不放行 wss） */
+mountIFlytekHttpSessionRoutes(apiRouter)
 
 /** Unified agent management entry — Domain Agents + IntentRouter skills. */
 apiRouter.get('/agents', (_req, res) => {
