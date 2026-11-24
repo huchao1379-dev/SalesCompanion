@@ -48,7 +48,7 @@ import {
   upsertDraft,
 } from '../../data/dataverse'
 import { canConfirmDraft } from '../../data/syncStatus'
-import { useWebSpeech } from '../../speech/useWebSpeech'
+import { useSpeechRecognition } from '../../speech/useSpeechRecognition'
 
 type PendingAttachment = {
   id: string
@@ -333,7 +333,7 @@ function NativeChat({
   onOpenAccount,
   onOpenOpportunity,
 }: Props) {
-  const speech = useWebSpeech()
+  const speech = useSpeechRecognition()
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
@@ -396,14 +396,18 @@ function NativeChat({
     }
   }, [])
 
-  // Voice-First: prefer mic when Web Speech is available (docs/03 · 05).
+  // Voice-First: prefer mic when ASR is available (讯飞或浏览器 Web Speech)。
   useEffect(() => {
     if (voicePreferredRef.current) return
     if (!speech.supported) return
     voicePreferredRef.current = true
     setComposerMode('voice')
-    setVoiceHint('长按识别语音；点键盘可切回文字输入')
-  }, [speech.supported])
+    setVoiceHint(
+      speech.provider === 'iflytek'
+        ? '长按识别语音（讯飞）；点键盘可切回文字输入'
+        : '长按识别语音；点键盘可切回文字输入',
+    )
+  }, [speech.supported, speech.provider])
 
   // Avoid speaking into a cold engine — first syllables are often dropped before ready.
   useEffect(() => {

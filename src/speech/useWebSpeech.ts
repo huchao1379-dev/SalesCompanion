@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { SpeechErrorKind, SpeechRecognitionState, StopOptions } from './types'
+
+export type { SpeechErrorKind, StopOptions }
+export type WebSpeechState = SpeechRecognitionState
 
 type SpeechRecognitionLike = {
   lang: string
@@ -24,44 +28,6 @@ type SpeechRecognitionEventLike = {
 type SpeechWindow = Window & {
   SpeechRecognition?: new () => SpeechRecognitionLike
   webkitSpeechRecognition?: new () => SpeechRecognitionLike
-}
-
-export type SpeechErrorKind = 'not-allowed' | 'no-speech' | 'network' | 'unsupported' | 'other'
-
-export type StopOptions = {
-  /**
-   * Wait this long after the user releases before cutting the mic.
-   * Trailing syllables are often still in flight when the finger lifts.
-   */
-  graceMs?: number
-  /** Max time to wait for final onresult/onend after stop(). */
-  settleMs?: number
-}
-
-export type WebSpeechState = {
-  supported: boolean
-  /** Recognition session is open (may still be warming up). */
-  listening: boolean
-  /** Mic/audio pipeline is live — safe to speak. */
-  ready: boolean
-  paused: boolean
-  transcript: string
-  interimTranscript: string
-  error: string | null
-  errorKind: SpeechErrorKind | null
-  /** Start recognition; clears prior transcript. */
-  start: (lang?: string) => void
-  /** Resume after pause without clearing the accumulated transcript. */
-  resume: (lang?: string) => void
-  /** Temporarily stop recognition while keeping the transcript. */
-  pause: (opts?: StopOptions) => Promise<string>
-  /** Stop and return the best available transcript after engine settles. */
-  stop: (opts?: StopOptions) => Promise<string>
-  /** Abort without keeping interim as intentional stop; clears listening. */
-  cancel: () => void
-  reset: () => void
-  setTranscript: (value: string) => void
-  clearError: () => void
 }
 
 const DEFAULT_GRACE_MS = 280
@@ -552,6 +518,7 @@ export function useWebSpeech(): WebSpeechState {
 
   return {
     supported,
+    provider: 'webspeech',
     listening,
     ready,
     paused,

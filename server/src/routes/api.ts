@@ -4,12 +4,15 @@ import {
   config,
   hasCopilotStudioConfig,
   hasDeepSeek,
+  hasIFlytek,
   hasLlm,
   hasOpenAI,
   hasVisionModel,
   hasWebFetch,
   hasWebSearch,
+  resolveSpeechProvider,
 } from '../config.js'
+import { issueIFlytekIatTicket } from '../speech/iflytek.js'
 import { CopilotStudioConfigurationError, copilotStudioOrchestrate } from '../copilotStudio.js'
 import { orchestrate } from '../orchestrator.js'
 import { repository } from '../store/dataverseStore.js'
@@ -59,14 +62,39 @@ apiRouter.get('/health', async (_req, res) => {
       config.aiProvider === 'openai' && hasOpenAI()
         ? 'openai=true 表示已配置 Key；若聊天仍规则兜底，多为无法访问 OPENAI_BASE_URL（需代理/网关）。'
         : undefined,
+    speechProvider: resolveSpeechProvider(),
+    iflytek: hasIFlytek(),
     capabilities: {
       activityInsight: true,
       opportunityInsight: true,
       generalAssist: true,
       webSearch: hasWebSearch(),
       webFetch: hasWebFetch(),
+      speechIFlytek: hasIFlytek(),
     },
   })
+})
+
+/**
+ * 讯飞听写短时签票：APISecret 留在服务端，前端用返回的 url 直连 iat-api.xfyun.cn。
+ * 未配置密钥时返回 503，前端应回退 Web Speech。
+ */
+apiRouter.get('/speech/iat/ticket', (_req, res) => {
+  if (!hasIFlytek()) {
+    res.status(503).json({
+      error: '讯飞语音未配置',
+      detail: '请在 server/.env 填写 IFLYTEK_APP_ID / IFLYTEK_API_KEY / IFLYTEK_API_SECRET',
+      speechProvider: resolveSpeechProvider(),
+    })
+    return
+  }
+  try {
+    res.json(issueIFlytekIatTicket())
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : '签发讯飞票据失败',
+    })
+  }
 })
 
 /** Unified agent management entry — Domain Agents + IntentRouter skills. */

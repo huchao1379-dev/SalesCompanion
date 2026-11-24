@@ -4,9 +4,11 @@ import {
   activeLlmModelName,
   config,
   hasDeepSeek,
+  hasIFlytek,
   hasLlm,
   hasOpenAI,
   hasVisionModel,
+  resolveSpeechProvider,
 } from './config.js'
 import { apiRouter } from './routes/api.js'
 import { repository } from './store/dataverseStore.js'
@@ -40,6 +42,9 @@ app.listen(config.port, config.host, () => {
   }
   console.log(
     `  Vision: ${hasVisionModel() ? 'ON (' + config.visionModel + ')' : 'OFF → image attachments text-only notice'}`,
+  )
+  console.log(
+    `  Speech: ${resolveSpeechProvider()}${hasIFlytek() ? ' (讯飞已配置)' : ' (未配置讯飞 → Web Speech / 启发式)'}`,
   )
   console.log(`  Data repository: dataverse-webapi (${config.dataverseUrl})`)
 })

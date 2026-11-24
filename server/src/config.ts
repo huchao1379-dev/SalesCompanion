@@ -101,6 +101,27 @@ export const config = {
     return Boolean(process.env.WEB_SEARCH_API_KEY?.trim())
   })(),
   promptVersion: process.env.PROMPT_VERSION || 'demo-deepseek-v3',
+
+  /** 讯飞语音听写（流式版）— Key 仅服务端持有，前端通过 /api/speech/iat/ticket 取短时签票。 */
+  iflytekAppId: process.env.IFLYTEK_APP_ID?.trim() || '',
+  iflytekApiKey: process.env.IFLYTEK_API_KEY?.trim() || '',
+  iflytekApiSecret: process.env.IFLYTEK_API_SECRET?.trim() || '',
+  iflytekLanguage: (process.env.IFLYTEK_LANGUAGE || 'zh_cn').trim(),
+  iflytekDomain: (process.env.IFLYTEK_DOMAIN || 'iat').trim(),
+  iflytekAccent: (process.env.IFLYTEK_ACCENT || 'mandarin').trim(),
+  /** wpgs = 动态修正（中文）；空字符串关闭 */
+  iflytekDwa: (process.env.IFLYTEK_DWA ?? 'wpgs').trim(),
+  iflytekVadEos: Number(process.env.IFLYTEK_VAD_EOS || 3000),
+  /**
+   * Speech provider preference:
+   * - auto: 有讯飞密钥则 iflytek，否则 webspeech
+   * - iflytek / webspeech: 强制
+   */
+  speechProvider: (() => {
+    const raw = (process.env.SPEECH_PROVIDER || 'auto').trim().toLowerCase()
+    if (raw === 'iflytek' || raw === 'webspeech' || raw === 'auto') return raw
+    return 'auto'
+  })(),
 }
 
 export function hasDeepSeek(): boolean {
@@ -156,4 +177,15 @@ export function hasWebSearch(): boolean {
 
 export function hasWebFetch(): boolean {
   return config.webFetchEnabled
+}
+
+export function hasIFlytek(): boolean {
+  return Boolean(config.iflytekAppId && config.iflytekApiKey && config.iflytekApiSecret)
+}
+
+/** Effective speech ASR provider for clients. */
+export function resolveSpeechProvider(): 'iflytek' | 'webspeech' {
+  if (config.speechProvider === 'webspeech') return 'webspeech'
+  if (config.speechProvider === 'iflytek') return hasIFlytek() ? 'iflytek' : 'webspeech'
+  return hasIFlytek() ? 'iflytek' : 'webspeech'
 }

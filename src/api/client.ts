@@ -15,13 +15,38 @@ type ApiHealth = {
   copilotstudio?: boolean
   dataverseMode: string
   promptVersion: string
+  speechProvider?: 'iflytek' | 'webspeech'
+  iflytek?: boolean
   capabilities?: {
     activityInsight?: boolean
     opportunityInsight?: boolean
     generalAssist?: boolean
     webSearch?: boolean
     webFetch?: boolean
+    speechIFlytek?: boolean
   }
+}
+
+export type IFlytekIatTicket = {
+  provider: 'iflytek'
+  url: string
+  appId: string
+  host: string
+  audio: {
+    sampleRate: number
+    format: string
+    encoding: string
+    frameBytes: number
+    frameIntervalMs: number
+  }
+  business: {
+    language: string
+    domain: string
+    accent: string
+    dwa: string
+    vadEos: number
+  }
+  expiresAt: string
 }
 
 let activityInsightCapability:
@@ -188,6 +213,20 @@ type InsightApiResponse = {
 
 export const api = {
   health: () => request<ApiHealth>('/health'),
+  /** Short-lived 讯飞听写 WebSocket URL (APISecret stays on server). */
+  speechIatTicket: async () => {
+    try {
+      return await request<IFlytekIatTicket>('/speech/iat/ticket')
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.status === 503) {
+        throw new ApiRequestError('讯飞语音未配置（请在 server/.env 填写 IFLYTEK_*）', 'http', {
+          status: 503,
+          detail: err.detail,
+        })
+      }
+      throw err
+    }
+  },
   supportsActivityInsight,
   supportsOpportunityInsight,
   orchestrate: (

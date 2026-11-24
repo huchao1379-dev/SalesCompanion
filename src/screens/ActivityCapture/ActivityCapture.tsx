@@ -36,7 +36,7 @@ import {
   listOfflineUtterances,
   markOfflineSynced,
 } from '../../data/offlineQueue'
-import { useWebSpeech } from '../../speech/useWebSpeech'
+import { useSpeechRecognition } from '../../speech/useSpeechRecognition'
 
 type Props = {
   initialDrafts?: DraftPayload[]
@@ -245,7 +245,7 @@ export function ActivityCapture({
   onOpenOpportunity,
   onAccountChange,
 }: Props) {
-  const speech = useWebSpeech()
+  const speech = useSpeechRecognition()
   const [phase, setPhase] = useState<CapturePhase>(() =>
     initialDrafts.length > 0 ? 'transcript_ready' : 'idle',
   )
@@ -1117,7 +1117,9 @@ export function ActivityCapture({
         )}
 
         <p className="capture-screen__privacy muted">
-          语音识别由浏览器提供，通常需联网；确认前不会写入 SAP。
+          {speech.provider === 'iflytek'
+            ? '语音识别由讯飞听写提供，需联网；确认前不会写入 SAP。'
+            : '语音识别由浏览器提供，通常需联网；确认前不会写入 SAP。'}
         </p>
 
         {(opportunityDrafts.length > 0 && onOpenOpportunity) || offlinePending > 0 ? (

@@ -58,6 +58,35 @@ npm run dev
 | `WEB_SEARCH_API_KEY` | 可选；通用助手实时网页检索（Serper/Tavily） |
 | `WEB_SEARCH_PROVIDER` | `serper`（默认）或 `tavily` |
 | `WEB_FETCH_ENABLED` | 可选；抓取 https 页面（有搜索 Key 时默认开启） |
+| `SPEECH_PROVIDER` | `auto`（默认）/ `iflytek` / `webspeech` |
+| `IFLYTEK_APP_ID` / `API_KEY` / `API_SECRET` | 可选；配置后语音走讯飞听写（国内可用，不依赖 Google） |
+
+### 切换到讯飞语音识别
+
+架构：浏览器采 PCM → `GET /api/speech/iat/ticket` 取短时签票 → 直连 `wss://iat-api.xfyun.cn`（**APISecret 只留在服务端**）。
+
+1. 在[讯飞开放平台](https://console.xfyun.cn/)创建应用并开通 **语音听写（流式版）**，复制 AppID / APIKey / APISecret
+2. 若尚无 `server/.env`：`cd server && copy .env.example .env`（macOS/Linux 用 `cp`）
+3. 在 `server/.env` 填写：
+
+```bash
+SPEECH_PROVIDER=auto
+IFLYTEK_APP_ID=你的AppID
+IFLYTEK_API_KEY=你的APIKey
+IFLYTEK_API_SECRET=你的APISecret
+# 可选：语言/方言/动态修正
+# IFLYTEK_LANGUAGE=zh_cn
+# IFLYTEK_ACCENT=mandarin
+# IFLYTEK_DWA=wpgs
+# IFLYTEK_VAD_EOS=3000
+```
+
+4. 重启 API（`npm run dev` 或 `npm run dev:all`）
+5. 验证：`curl http://127.0.0.1:8787/api/health` 应看到 `"speechProvider":"iflytek"`、`"iflytek":true`
+6. 打开对话页 / 拜访录入，长按麦克风；隐私文案应显示「讯飞听写」
+7. 前端也可强制：根目录 `.env` 设 `VITE_SPEECH_PROVIDER=iflytek`（或 `webspeech`）后重启 Vite
+
+未配置讯飞密钥时自动回退浏览器 Web Speech（Chrome 国内常不稳定）。线上 Power Platform CSP 的 `connect-src` 需同时允许：你的 API 域名、以及 `wss://iat-api.xfyun.cn`。
 
 ### 切换到 OpenAI gpt-6-luna
 
