@@ -4,7 +4,7 @@
  */
 import type { Server as HttpServer, IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
-import { WebSocketServer, WebSocket } from 'ws'
+import { WebSocketServer, WebSocket, type RawData } from 'ws'
 import { hasIFlytek } from '../config.js'
 import { buildIFlytekIatAuthUrl } from './iflytek.js'
 
@@ -25,7 +25,7 @@ export function attachIFlytekIatProxy(server: HttpServer) {
       socket.destroy()
       return
     }
-    wss.handleUpgrade(req, socket as Duplex, head, (client) => {
+    wss.handleUpgrade(req, socket as Duplex, head, (client: WebSocket) => {
       pipeClientToIFlytek(client)
     })
   })
@@ -69,7 +69,7 @@ function pipeClientToIFlytek(client: WebSocket) {
     return
   }
 
-  const pending: Array<{ data: WebSocket.RawData; isBinary: boolean }> = []
+  const pending: Array<{ data: RawData; isBinary: boolean }> = []
 
   upstream.on('open', () => {
     for (const item of pending.splice(0)) {
@@ -83,7 +83,7 @@ function pipeClientToIFlytek(client: WebSocket) {
     }
   })
 
-  upstream.on('message', (data, isBinary) => {
+  upstream.on('message', (data: RawData, isBinary: boolean) => {
     if (client.readyState !== WebSocket.OPEN) return
     try {
       client.send(data, { binary: isBinary })
@@ -105,7 +105,7 @@ function pipeClientToIFlytek(client: WebSocket) {
 
   upstream.on('close', () => shutdown())
 
-  client.on('message', (data, isBinary) => {
+  client.on('message', (data: RawData, isBinary: boolean) => {
     if (!upstream || upstream.readyState === WebSocket.CONNECTING) {
       pending.push({ data, isBinary })
       return
