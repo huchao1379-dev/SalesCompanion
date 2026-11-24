@@ -17,7 +17,9 @@ import {
 } from '../../components/DashIcons'
 import { IconButton } from '../../components/IconButton'
 import { SheetScrim } from '../../components/SheetScrim'
+import { listAccountsFromApi } from '../../data/accounts'
 import { buildBriefChapters, type BriefChapter } from '../../data/brief'
+import type { AccountProfile } from '../../agents/types'
 import { listDrafts } from '../../data/dataverse'
 import { subscribeDrafts } from '../../data/draftStore'
 import { cancelSpeech, speakText, unlockSpeech } from '../../speech/tts'
@@ -54,6 +56,7 @@ function chapterToInsight(chapter: BriefChapter | undefined, index: number) {
 }
 
 export function BriefMe({ open, onClose, playRequestId = 0 }: Props) {
+  const [accounts, setAccounts] = useState<AccountProfile[]>([])
   const [chapters, setChapters] = useState(() => buildBriefChapters(listDrafts()))
   const [page, setPage] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -99,10 +102,26 @@ export function BriefMe({ open, onClose, playRequestId = 0 }: Props) {
   }, [pages])
 
   useEffect(() => {
-    return subscribeDrafts((drafts) => {
-      setChapters(buildBriefChapters(drafts))
-    })
+    let alive = true
+    void listAccountsFromApi()
+      .then((list) => {
+        if (!alive) return
+        setAccounts(list)
+        setChapters(buildBriefChapters(listDrafts(), list))
+      })
+      .catch(() => {
+        if (alive) setAccounts([])
+      })
+    return () => {
+      alive = false
+    }
   }, [])
+
+  useEffect(() => {
+    return subscribeDrafts((drafts) => {
+      setChapters(buildBriefChapters(drafts, accounts))
+    })
+  }, [accounts])
 
   useEffect(() => {
     return () => {
@@ -276,7 +295,7 @@ export function BriefMe({ open, onClose, playRequestId = 0 }: Props) {
   /* eslint-enable react-hooks/set-state-in-effect */
 
   function refresh() {
-    setChapters(buildBriefChapters(listDrafts()))
+    setChapters(buildBriefChapters(listDrafts(), accounts))
     // Refresh → restart from the first card and autoplay.
     goToPage(0, { play: true, playlist: true })
   }

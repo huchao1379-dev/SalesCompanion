@@ -12,7 +12,8 @@
     "build": "tsc",
     "test": "tsx --test test/*.test.ts",
     "start:prod": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dataverse:verify": "tsx scripts/verify-repo.mjs"
   },
   "dependencies": {
     "@microsoft/agents-copilotstudio-client": "1.10.1",

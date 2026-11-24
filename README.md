@@ -38,7 +38,7 @@ npm run dev
 | B 客户速览 | 「仁济医院最近怎么样？」 |
 | C 订单物流（选做） | 「查一下仁济医院上个订单的物流」 |
 
-编排：**DeepSeek**（默认）或 **OpenAI gpt-6-luna**（`AI_PROVIDER=openai`）；有 Key 时启用，否则启发式兜底。数据：**Dataverse 种子内存库**（`dataverse/seed/seed.json`）。
+编排：**DeepSeek**（默认）或 **OpenAI gpt-6-luna**（`AI_PROVIDER=openai`）；有 Key 时启用，否则启发式兜底。数据：**真实 Dataverse**（`DATAVERSE_*` 必填，无内存种子回退）。
 
 > Copilot Studio 接入代码保留为可选路径（`AI_PROVIDER=copilotstudio` + 管理端配置），Demo 默认不使用，也不作为验收前提。
 
@@ -53,7 +53,8 @@ npm run dev
 | `OPENAI_MODEL` | 默认 `gpt-6-luna`（也接受 `gpt6-luna`） |
 | `OPENAI_REASONING_EFFORT` | `none` / `low`（默认）/ `medium` / `high` / `xhigh` / `max` |
 | `OPENAI_BASE_URL` | 默认 `https://api.openai.com`（走 `/v1/responses`） |
-| `DATAVERSE_URL` / `DATAVERSE_TOKEN` | 可选；不填用内存种子 |
+| `DATAVERSE_URL` + Token 或 Client Credentials | **必填**；读写真实 Dataverse 表 |
+| `DATAVERSE_PREFIX` | 表前缀，如 `hc` |
 | `WEB_SEARCH_API_KEY` | 可选；通用助手实时网页检索（Serper/Tavily） |
 | `WEB_SEARCH_PROVIDER` | `serper`（默认）或 `tavily` |
 | `WEB_FETCH_ENABLED` | 可选；抓取 https 页面（有搜索 Key 时默认开启） |
@@ -82,7 +83,7 @@ Demo 默认不依赖 Copilot Studio / AI Builder；Copilot Studio 连接保留�
 | 环境 | 做法 |
 | --- | --- |
 | 本地 | `npm run dev:all` → http://127.0.0.1:5174 |
-| 线上 | ① 把本仓库（至少 `server/` + `dataverse/seed/`）部署到你的服务器 ② 见下方「后端服务器部署」 ③ 构建前端前设 `VITE_API_BASE=https://你的API域名/api` ④ Power Platform CSP `connect-src` 允许该 API 域名（**不要只加** `api.deepseek.com`） |
+| 线上 | ① 部署 `server/` 并配置 `DATAVERSE_*` ② 见下方「后端服务器部署」 ③ 构建前端前设 `VITE_API_BASE=https://你的API域名/api` ④ Power Platform CSP `connect-src` 允许该 API 域名（**不要只加** `api.deepseek.com`） |
 
 ### 后端服务器部署（Linux + Node + PM2 + Nginx）
 

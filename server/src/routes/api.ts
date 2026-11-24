@@ -476,6 +476,13 @@ apiRouter.get('/conversations/:sessionKey', async (req, res) => {
   })
 })
 
-apiRouter.post('/seed/reload', async (_req, res) => {
-  res.json({ ok: true, accounts: await repository.reloadSeed() })
+apiRouter.get('/dataverse/status', async (_req, res) => {
+  const accounts = await repository.listAccounts()
+  res.json({
+    ok: true,
+    mode: repository.mode,
+    url: config.dataverseUrl,
+    prefix: config.dataversePrefix,
+    accounts: accounts.length,
+  })
 })

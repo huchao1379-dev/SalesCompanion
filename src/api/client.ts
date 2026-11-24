@@ -248,7 +248,7 @@ export const api = {
         openDrafts: number
         draftAdoptionPct: number
         accountCount?: number
-        seedOpportunityCount?: number
+        opportunityCount?: number
       }
     }>('/metrics'),
   accounts: () => request<{ accounts: unknown[] }>('/accounts'),

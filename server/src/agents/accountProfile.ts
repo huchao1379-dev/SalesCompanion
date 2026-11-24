@@ -227,8 +227,6 @@ function buildAccountPulseUi(
   const lastVisit = formatDate(account.lastVisitAt)
   const dataAt = formatDate(latestDataAt(account, opps))
   const visitStale = isStaleVisitWindow(account.lastVisitAt)
-  const seedish = opps.some((o) => o.isSeed) || visitStale
-
   const primary: MessageUiMetric[] = [
     {
       label: '信用',
@@ -298,7 +296,7 @@ function buildAccountPulseUi(
   const footnoteParts = [
     dataAt ? `数据更新于 ${dataAt}` : null,
     visitStale && lastVisit ? `最近拜访 ${lastVisit}（已超过 30 天，数据可能过期）` : null,
-    seedish ? '种子演示数据，请核实是否为最新 CRM 状态' : '请以 CRM 实时数据为准',
+    '请以 Dataverse / CRM 实时数据为准',
   ].filter(Boolean)
 
   const followUps = [

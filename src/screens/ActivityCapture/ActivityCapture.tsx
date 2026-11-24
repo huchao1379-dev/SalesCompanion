@@ -23,12 +23,7 @@ import { AiSummaryModal } from '../../components/AiSummaryModal'
 import { DraftCard } from '../../components/DraftCard'
 import { MicButton } from '../../components/MicButton'
 import { ScreenHeader } from '../../components/ScreenHeader'
-import {
-  fetchAccountInsight,
-  getAccountInsight,
-  listAccountsFromApi,
-  listMockAccounts,
-} from '../../data/accounts'
+import { fetchAccountInsight, listAccountsFromApi } from '../../data/accounts'
 import {
   confirmAndSyncDetailed,
   discardDraft,
@@ -255,10 +250,8 @@ export function ActivityCapture({
     initialDrafts.length > 0 ? 'transcript_ready' : 'idle',
   )
   const [accountPickerOpen, setAccountPickerOpen] = useState(false)
-  const [accountOptions, setAccountOptions] = useState<AccountProfile[]>(() => listMockAccounts())
-  const [selectedAccountRef, setSelectedAccountRef] = useState(
-    () => accountKey || 'SAP-ACC-RENJI',
-  )
+  const [accountOptions, setAccountOptions] = useState<AccountProfile[]>([])
+  const [selectedAccountRef, setSelectedAccountRef] = useState(() => accountKey || '')
   const [transcriptEdit, setTranscriptEdit] = useState(() => {
     const fromActivity = initialDrafts.find((d) => d.kind === 'activity')
     return fromActivity && 'transcript' in fromActivity ? fromActivity.transcript : ''
@@ -282,18 +275,18 @@ export function ActivityCapture({
   const [elapsed, setElapsed] = useState(0)
   const contentAreaRef = useRef<HTMLTextAreaElement | null>(null)
 
-  const [contextAccount, setContextAccount] = useState<AccountProfile | null>(() =>
-    getAccountInsight(selectedAccountRef),
-  )
+  const [contextAccount, setContextAccount] = useState<AccountProfile | null>(null)
 
   useEffect(() => {
     let alive = true
     void listAccountsFromApi()
       .then((list) => {
-        if (alive && list.length) setAccountOptions(list)
+        if (!alive || !list.length) return
+        setAccountOptions(list)
+        setSelectedAccountRef((prev) => prev || list[0]?.accountRef || '')
       })
       .catch(() => {
-        /* Keep mock list. */
+        if (alive) setAccountOptions([])
       })
     return () => {
       alive = false
@@ -302,14 +295,18 @@ export function ActivityCapture({
 
   useEffect(() => {
     let alive = true
-    const seed = getAccountInsight(selectedAccountRef)
-    if (seed) setContextAccount(seed)
+    if (!selectedAccountRef) {
+      setContextAccount(null)
+      return () => {
+        alive = false
+      }
+    }
     void fetchAccountInsight(selectedAccountRef)
       .then((profile) => {
-        if (alive && profile) setContextAccount(profile)
+        if (alive) setContextAccount(profile)
       })
       .catch(() => {
-        /* Keep the offline/seed fallback. */
+        if (alive) setContextAccount(null)
       })
     return () => {
       alive = false
@@ -413,6 +410,11 @@ export function ActivityCapture({
       setStatusDetail(speech.error)
     }
   }, [speech.errorKind, speech.error, phase])
+
+  useEffect(() => {
+    if (phase !== 'recording' || !speech.listening) return
+    setStatusDetail(speech.ready ? null : '准备中，请稍等再开口…')
+  }, [phase, speech.listening, speech.ready])
   /* eslint-enable react-hooks/set-state-in-effect */
 
   function selectAccount(profile: AccountProfile) {
@@ -566,11 +568,13 @@ export function ActivityCapture({
     recordStartedAt.current = Date.now()
     setElapsed(0)
     setPhase('recording')
+    setStatusDetail('准备中，请稍等再开口…')
     speech.start('zh-CN')
   }
 
-  function pauseRecording() {
-    const text = speech.pause()
+  async function pauseRecording() {
+    setStatusDetail('正在收尾识别…')
+    const text = await speech.pause()
     if (recordStartedAt.current != null) {
       pausedAccumulated.current += Math.floor((Date.now() - recordStartedAt.current) / 1000)
       recordStartedAt.current = null
@@ -585,12 +589,14 @@ export function ActivityCapture({
     speech.clearError()
     recordStartedAt.current = Date.now()
     setPhase('recording')
-    setStatusDetail(null)
+    setStatusDetail('准备中，请稍等再开口…')
     speech.resume('zh-CN')
   }
 
-  function endRecording() {
-    const text = speech.listening || speech.paused ? speech.stop() : transcriptEdit
+  async function endRecording() {
+    setStatusDetail('正在收尾识别…')
+    const text =
+      speech.listening || speech.paused ? await speech.stop() : transcriptEdit
     recordStartedAt.current = null
     pausedAccumulated.current = 0
     const finalText = text.trim() || transcriptEdit.trim()

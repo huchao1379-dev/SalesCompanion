@@ -1,5 +1,5 @@
 /**
- * Account list — answers “我的客户有哪些” by listing seed accounts,
+ * Account list — answers “我的客户有哪些” by listing Dataverse accounts,
  * not by resolving the utterance as a customer name.
  */
 import type { DomainAgent } from './agentTypes.js'

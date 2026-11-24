@@ -41,7 +41,5 @@ app.listen(config.port, config.host, () => {
   console.log(
     `  Vision: ${hasVisionModel() ? 'ON (' + config.visionModel + ')' : 'OFF → image attachments text-only notice'}`,
   )
-  console.log(
-    `  Data repository: ${repository.mode} (dataverse/seed/seed.json)`,
-  )
+  console.log(`  Data repository: dataverse-webapi (${config.dataverseUrl})`)
 })

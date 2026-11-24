@@ -142,8 +142,6 @@ export type AccountProfileView = {
 }
 
 const PENDING = '待补充'
-const MOCK_NOTE =
-  '当前为演示 Mock 数据（API 不可用或离线）。事实与 AI 内容均隔离在接入层，不得当作已同步 CRM。'
 
 type ApiAccount = {
   id: string
@@ -609,159 +607,6 @@ function toViewFromApi(payload: {
   }
 }
 
-/** Explicit mock pack — only used when API is unreachable. */
-const MOCK_VIEWS: Record<string, AccountProfileView> = {
-  'SAP-ACC-RENJI': toViewFromApi({
-    account: {
-      id: 'acc-renji',
-      externalKey: 'SAP-ACC-RENJI',
-      name: '上海仁济医院',
-      region: '华东',
-      creditLevel: 'A',
-      visitCount30d: 4,
-      npsDelta: '+12',
-      lastVisitAt: '2026-04-22T10:00:00.000Z',
-      hasMsa: true,
-      notes: '信用 A 级、已签 MSA。开放商机以监护仪 N17（Identify）为主。建议确认 ICU 扩容采购窗口。',
-    },
-    contacts: [
-      { id: 'con-zhang', accountId: 'acc-renji', name: '张主任', title: '设备科主任', phone: '' },
-    ],
-    opportunities: [
-      {
-        id: 'opp-n17',
-        name: '上海仁济医院 · 监护仪 N17',
-        stage: 'Identify',
-        amount: 144000,
-        currencyCode: 'USD',
-        closeDate: '2026-09-30',
-        productLine: '监护仪',
-        productModel: 'N17',
-        confidenceScore: 0.78,
-        syncStatus: 'Synced',
-        crmWinProbability: null,
-        ownerName: null,
-        nextAction: null,
-      },
-    ],
-    orders: [
-      {
-        id: 'ord-renji-1',
-        externalKey: 'SAP-ORD-RENJI-001',
-        name: '仁济 · 既往监护仪订单',
-        status: '已发货',
-        orderedAt: '2025-11-12',
-        amount: 72000,
-        currencyCode: 'USD',
-      },
-    ],
-    shipments: [
-      {
-        id: 'shp-renji-1',
-        orderId: 'ord-renji-1',
-        name: '仁济空运批次 R1',
-        status: '已签收',
-        eta: '2025-12-01',
-        trackingNo: 'CA-99210',
-      },
-    ],
-    activities: [],
-    profile: {
-      agent_name: '客户画像 Agent',
-      content:
-        '上海仁济医院：信用 A 级、已签 MSA；近 30 天 4 次拜访。开放商机：监护仪 N17 · Identify。建议确认采购窗口（待核实）。',
-      createdAt: '2026-04-22T10:00:00.000Z',
-      sources: [{ kind: 'dataverse', label: '上海仁济医院 · Account', ref: 'SAP-ACC-RENJI' }],
-    },
-    meta: {
-      asOf: '2026-04-22T10:00:00.000Z',
-      note: MOCK_NOTE,
-      missingFields: ['ownerName', 'address', 'contact.role', 'crmWinProbability', 'serviceTickets'],
-    },
-  }),
-}
-
-MOCK_VIEWS['SAP-ACC-ALPHA'] = toViewFromApi({
-  account: {
-    id: 'acc-alpha',
-    externalKey: 'SAP-ACC-ALPHA',
-    name: 'Hospital Alpha',
-    region: 'LATAM',
-    creditLevel: 'A',
-    visitCount30d: 3,
-    npsDelta: '+8',
-    lastVisitAt: '2026-04-29T14:00:00.000Z',
-    hasMsa: true,
-    notes: '今日拜访关注 A3 演示反馈；ICU 升级评估可能在 6 月启动。',
-  },
-  contacts: [
-    { id: 'con-alpha', accountId: 'acc-alpha', name: 'Maria Silva', title: 'ICU Manager', phone: '' },
-  ],
-  opportunities: [
-    {
-      id: 'opp-a1',
-      name: 'Hospital Alpha · A1 监护仪 ×8',
-      stage: 'Identify',
-      amount: 96000,
-      currencyCode: 'USD',
-      closeDate: '2026-09-30',
-      productLine: '监护仪',
-      productModel: 'A1',
-      confidenceScore: 0.78,
-      syncStatus: 'Synced',
-      crmWinProbability: null,
-      ownerName: null,
-      nextAction: null,
-    },
-  ],
-  orders: [
-    {
-      id: 'ord-alpha-1',
-      externalKey: 'SAP-ORD-ALPHA-001',
-      name: 'Alpha · A1 监护仪订单',
-      status: '清关中',
-      orderedAt: '2026-04-01',
-      amount: 96000,
-      currencyCode: 'USD',
-    },
-  ],
-  shipments: [
-    {
-      id: 'shp-alpha-1',
-      orderId: 'ord-alpha-1',
-      name: 'Alpha 海运批次 A',
-      status: '清关中',
-      eta: '2026-05-08',
-      trackingNo: 'MSKU-88421',
-    },
-  ],
-  profile: {
-    agent_name: '客户画像 Agent',
-    content: 'Hospital Alpha：信用 A、已签 MSA。开放商机 A1 监护仪。ICU 升级评估可能在 6 月启动（信息不足/待核实）。',
-    createdAt: '2026-04-29T14:00:00.000Z',
-    sources: [{ kind: 'sap', label: 'Hospital Alpha', ref: 'SAP-ACC-ALPHA' }],
-  },
-  meta: { asOf: '2026-04-29T14:00:00.000Z', note: MOCK_NOTE, missingFields: ['ownerName', 'address'] },
-})
-
-function markMock(view: AccountProfileView): AccountProfileView {
-  return {
-    ...view,
-    dataOrigin: 'mock',
-    note: MOCK_NOTE,
-    loadedAt: new Date().toISOString(),
-  }
-}
-
-export function getMockAccountProfile(refOrName: string): AccountProfileView | null {
-  const key = refOrName.trim()
-  if (MOCK_VIEWS[key]) return markMock(structuredClone(MOCK_VIEWS[key]))
-  const found = Object.values(MOCK_VIEWS).find(
-    (v) => v.header.name === key || v.header.name.includes(key) || key.includes(v.header.name),
-  )
-  return found ? markMock(structuredClone(found)) : null
-}
-
 export type LoadAccountProfileResult = {
   view: AccountProfileView | null
   error: 'not-found' | 'network' | 'forbidden' | null
@@ -769,17 +614,14 @@ export type LoadAccountProfileResult = {
 }
 
 export async function loadAccountProfile(refOrName: string): Promise<LoadAccountProfileResult> {
-  const offline = !isOnline()
-  if (offline) {
-    const mock = getMockAccountProfile(refOrName)
-    return { view: mock, error: mock ? null : 'not-found', offline: true }
+  if (!isOnline()) {
+    return { view: null, error: 'network', offline: true }
   }
 
   try {
     const res = (await api.account(refOrName)) as Parameters<typeof toViewFromApi>[0]
     if (!res?.account) {
-      const mock = getMockAccountProfile(refOrName)
-      return { view: mock, error: mock ? null : 'not-found', offline: false }
+      return { view: null, error: 'not-found', offline: false }
     }
     return { view: toViewFromApi(res), error: null, offline: false }
   } catch (err) {
@@ -787,12 +629,7 @@ export async function loadAccountProfile(refOrName: string): Promise<LoadAccount
     if (/403|forbidden/i.test(msg)) {
       return { view: null, error: 'forbidden', offline: false }
     }
-    const mock = getMockAccountProfile(refOrName)
-    return {
-      view: mock,
-      error: mock ? 'network' : 'not-found',
-      offline: false,
-    }
+    return { view: null, error: 'network', offline: false }
   }
 }
 

@@ -405,6 +405,14 @@ function NativeChat({
     setVoiceHint('长按识别语音；点键盘可切回文字输入')
   }, [speech.supported])
 
+  // Avoid speaking into a cold engine — first syllables are often dropped before ready.
+  useEffect(() => {
+    if (!speech.listening) return
+    setVoiceHint(
+      speech.ready ? '正在听你说话…松开结束' : '准备中，请稍等再开口…',
+    )
+  }, [speech.listening, speech.ready])
+
   // Hydrate drafts from API on mount; merge with local mirror.
   useEffect(() => {
     let cancelled = false
@@ -798,7 +806,7 @@ function NativeChat({
   }
 
   function exitVoiceMode() {
-    if (speech.listening) speech.stop()
+    if (speech.listening) void speech.stop({ graceMs: 0 })
     setComposerMode('text')
     setVoiceHint('')
     window.setTimeout(() => inputRef.current?.focus(), 40)
@@ -806,12 +814,13 @@ function NativeChat({
 
   function startVoicePress() {
     if (busy || generating || !speech.supported) return
-    setVoiceHint('正在听你说话…松开结束')
+    setVoiceHint('准备中，请稍等再开口…')
     speech.start('zh-CN')
   }
 
-  function stopVoicePress() {
-    const text = speech.stop()
+  async function stopVoicePress() {
+    setVoiceHint('正在收尾识别…')
+    const text = await speech.stop()
     if (text.trim()) {
       setVoiceHint('')
       setComposerMode('text')
@@ -1531,7 +1540,11 @@ function NativeChat({
                 <i />
               </span>
               <span>
-                {speech.listening ? '松开结束识别' : voiceHint || '长按识别语音'}
+                {speech.listening
+                  ? speech.ready
+                    ? '松开结束识别'
+                    : '准备中…'
+                  : voiceHint || '长按识别语音'}
               </span>
             </button>
           )}

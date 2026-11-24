@@ -1,5 +1,4 @@
-import type { DraftPayload } from '../agents/types'
-import { listMockAccounts } from './accounts'
+import type { AccountProfile, DraftPayload } from '../agents/types'
 import { computeHomeMetrics } from './metrics'
 
 export type BriefChapter = {
@@ -9,9 +8,11 @@ export type BriefChapter = {
   metrics: string[]
 }
 
-export function buildBriefChapters(drafts: DraftPayload[]): BriefChapter[] {
+export function buildBriefChapters(
+  drafts: DraftPayload[],
+  accounts: AccountProfile[] = [],
+): BriefChapter[] {
   const metrics = computeHomeMetrics(drafts)
-  const accounts = listMockAccounts()
   const openDrafts = drafts.filter((d) => d.syncStatus === 'Draft')
   const riskOpps = drafts.filter(
     (d) =>

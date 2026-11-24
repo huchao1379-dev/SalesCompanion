@@ -22,7 +22,7 @@ export type MetricsSnapshot = {
   openDrafts: number
   draftAdoptionPct: number
   accountCount: number
-  seedOpportunityCount: number
+  opportunityCount: number
 }
 
 export type DraftSnapshot = {
@@ -30,9 +30,9 @@ export type DraftSnapshot = {
   opportunityDrafts: OpportunityDraft[]
 }
 
-/** Async persistence boundary shared by the seed adapter and future Dataverse Web API adapter. */
+/** Async persistence boundary — live Dataverse Web API. */
 export interface SalesRepository {
-  readonly mode: 'seed-memory' | 'dataverse-webapi'
+  readonly mode: 'dataverse-webapi'
   listAccounts(): Promise<AccountRecord[]>
   listOpportunities(): Promise<OpportunityRecord[]>
   listOrders(): Promise<OrderRecord[]>
@@ -56,8 +56,7 @@ export interface SalesRepository {
   saveConversation(sessionKey: string, context: Record<string, string>, messages: unknown[]): Promise<ConversationRecord>
   getConversation(sessionKey: string): Promise<ConversationRecord | undefined>
   computeMetrics(): Promise<MetricsSnapshot>
-  reloadSeed(): Promise<number>
-  /** In-memory transaction helpers; a Dataverse adapter can implement these too. */
+  /** Optional draft rollback helpers (Web API uses idempotent upserts instead). */
   snapshotDrafts?(): DraftSnapshot
   restoreDrafts?(snapshot: DraftSnapshot): void
 }

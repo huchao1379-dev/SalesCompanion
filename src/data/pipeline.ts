@@ -111,88 +111,6 @@ type ApiOppRow = {
   ownerName?: string | null
 }
 
-/**
- * Offline / API-down fallback — mirrors dataverse/seed/seed.json.
- * Explicitly marked mock; never pretend to be live SAP.
- */
-const MOCK_PIPELINE: ApiOppRow[] = [
-  {
-    id: 'opp-n17',
-    externalKey: 'SAP-OPP-N17',
-    name: '上海仁济医院 · 监护仪 N17',
-    accountId: 'acc-renji',
-    accountName: '上海仁济医院',
-    accountExternalKey: 'SAP-ACC-RENJI',
-    productLine: '监护仪',
-    productModel: 'N17',
-    quantity: 12,
-    amount: 144000,
-    currencyCode: 'USD',
-    stage: 'Identify',
-    confidenceScore: 0.78,
-    closeDate: '2026-09-30',
-    syncStatus: 'synced',
-    isSeed: true,
-    accountLastVisitAt: '2026-04-22T10:00:00.000Z',
-    accountVisitCount30d: 4,
-    accountNpsDelta: '+12',
-    accountNotes: '近 3 次拜访摘要已聚合；信用 A 级、已签 MSA。当前开放商机以监护仪 N17（Identify）为主。',
-    primaryContact: { name: '张主任', title: '设备科主任' },
-    crmWinProbability: null,
-    ownerName: null,
-  },
-  {
-    id: 'opp-a1',
-    externalKey: 'SAP-OPP-A1',
-    name: 'Hospital Alpha · A1 监护仪 ×8',
-    accountId: 'acc-alpha',
-    accountName: 'Hospital Alpha',
-    accountExternalKey: 'SAP-ACC-ALPHA',
-    productLine: '监护仪',
-    productModel: 'A1',
-    quantity: 8,
-    amount: 96000,
-    currencyCode: 'USD',
-    stage: 'Identify',
-    confidenceScore: 0.78,
-    closeDate: '2026-09-30',
-    syncStatus: 'synced',
-    isSeed: true,
-    accountLastVisitAt: '2026-04-29T14:00:00.000Z',
-    accountVisitCount30d: 3,
-    accountNpsDelta: '+8',
-    accountNotes: '今日拜访关注 A3 演示反馈；ICU 升级评估可能在 6 月启动。',
-    primaryContact: { name: 'Maria Silva', title: 'ICU Manager' },
-    crmWinProbability: null,
-    ownerName: null,
-  },
-  {
-    id: 'opp-beta',
-    externalKey: 'SAP-OPP-BETA-N17',
-    name: 'Hospital Beta · N17',
-    accountId: 'acc-beta',
-    accountName: 'Hospital Beta',
-    accountExternalKey: 'SAP-ACC-BETA',
-    productLine: '监护仪',
-    productModel: 'N17',
-    quantity: 4,
-    amount: 48000,
-    currencyCode: 'USD',
-    stage: 'Identify',
-    confidenceScore: 0.55,
-    closeDate: '2026-08-15',
-    syncStatus: 'synced',
-    isSeed: true,
-    accountLastVisitAt: '2026-04-10T09:00:00.000Z',
-    accountVisitCount30d: 2,
-    accountNpsDelta: '-3',
-    accountNotes: 'N17 商机信心度偏低，建议确认采购窗口。',
-    primaryContact: null,
-    crmWinProbability: null,
-    ownerName: null,
-  },
-]
-
 function blank(value: unknown) {
   if (value == null) return true
   if (typeof value === 'string') return value.trim().length === 0
@@ -404,16 +322,15 @@ export async function loadPipelineSnapshot(
     return {
       items,
       dataOrigin: drafts.length ? 'mixed' : 'api',
-      note: res.note || '管线数据来自服务端种子/内存库',
+      note: res.note || '管线数据来自 Dataverse',
       loadedAt: new Date().toISOString(),
     }
   } catch {
-    const pipeline = MOCK_PIPELINE.map((r) => mapApiOpp(r, 'mock'))
-    const items = mergeItems(pipeline, drafts)
+    const items = mergeItems([], drafts)
     return {
       items,
-      dataOrigin: drafts.length ? 'mixed' : 'mock',
-      note: '【本地 Mock】后端 /opportunities 不可用，已加载与 seed 对齐的离线管线数据',
+      dataOrigin: drafts.length ? 'mixed' : 'api',
+      note: '无法连接后端 /opportunities，仅显示本地草稿（无离线 Mock 管线）',
       loadedAt: new Date().toISOString(),
     }
   }

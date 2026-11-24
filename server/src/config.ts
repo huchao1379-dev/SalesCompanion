@@ -83,6 +83,12 @@ export const config = {
   copilotStudioClientSecret: process.env.COPILOTSTUDIO_CLIENT_SECRET?.trim() || '',
   dataverseUrl: process.env.DATAVERSE_URL?.trim() || '',
   dataverseToken: process.env.DATAVERSE_TOKEN?.trim() || '',
+  /** App registration (preferred over static DATAVERSE_TOKEN). */
+  dataverseTenantId: process.env.DATAVERSE_TENANT_ID?.trim() || '',
+  dataverseClientId: process.env.DATAVERSE_CLIENT_ID?.trim() || '',
+  dataverseClientSecret: process.env.DATAVERSE_CLIENT_SECRET?.trim() || '',
+  /** Publisher prefix for logical names, e.g. crmai → crmai_account */
+  dataversePrefix: (process.env.DATAVERSE_PREFIX || 'crmai').trim().replace(/_$/g, ''),
   /** Optional live web search for general_assist (serper | tavily). Off when key empty. */
   webSearchProvider: (process.env.WEB_SEARCH_PROVIDER || 'serper').trim().toLowerCase(),
   webSearchApiKey: process.env.WEB_SEARCH_API_KEY?.trim() || '',
@@ -95,9 +101,6 @@ export const config = {
     return Boolean(process.env.WEB_SEARCH_API_KEY?.trim())
   })(),
   promptVersion: process.env.PROMPT_VERSION || 'demo-deepseek-v3',
-  seedPath:
-    process.env.SEED_PATH ||
-    path.resolve(__dirname, '../../dataverse/seed/seed.json'),
 }
 
 export function hasDeepSeek(): boolean {
@@ -139,7 +142,11 @@ export function hasCopilotStudioConfig(): boolean {
 }
 
 export function hasRemoteDataverse(): boolean {
-  return Boolean(config.dataverseUrl && config.dataverseToken)
+  if (!config.dataverseUrl) return false
+  if (config.dataverseToken) return true
+  return Boolean(
+    config.dataverseTenantId && config.dataverseClientId && config.dataverseClientSecret,
+  )
 }
 
 /** Live web search is opt-in via WEB_SEARCH_API_KEY. */
