@@ -1,40 +1,53 @@
 import { api } from '../api/client'
 
+type SpeakError = SpeechSynthesisErrorEvent & { detail?: string }
+
 type SpeakOptions = {
   lang?: string
   rate?: number
   onStart?: () => void
   onEnd?: () => void
-  onError?: (error: SpeechSynthesisErrorEvent) => void
+  onError?: (error: SpeakError) => void
 }
-
-const SILENT_WAV =
-  'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'
 
 let voicesReady: Promise<SpeechSynthesisVoice[]> | null = null
 let speechGateTimer: number | null = null
 let audioUnlockCtx: AudioContext | null = null
 let iflytekTtsCapable: boolean | null = null
 let iflytekTtsProbe: Promise<boolean> | null = null
-/** Single shared player — unlock + 讯飞 MP3 reuse the same element (mobile gesture). */
+/**
+ * Prefer Web Audio (decodeAudioData) over <audio src> —
+ * Power Apps CSP is often `media-src 'self' data:` and blocks `blob:`;
+ * large data: MP3 URLs also fail on some Android WebViews.
+ * Web Audio does not go through media-src.
+ */
+let activeBufferSource: AudioBufferSourceNode | null = null
+/** Fallback <audio> only when Web Audio decode fails. */
 let sharedAudio: HTMLAudioElement | null = null
-let sharedObjectUrl: string | null = null
+let sharedDataUrl: string | null = null
 /** Bumped whenever real playback / hard-stop starts — voids stale silent-unlock .then(). */
 let sharedAudioEpoch = 0
-/** Active utterance stopper (browser synth and/or 讯飞 HTMLAudioElement). */
+/** Active utterance stopper (browser synth and/or 讯飞 playback). */
 let activeStop: (() => void) | null = null
 /** Monotonic token so a cancelled async 讯飞 fetch never starts audio. */
 let speakToken = 0
 
 function hardStopSharedAudio() {
   sharedAudioEpoch += 1
-  if (sharedObjectUrl) {
+  sharedDataUrl = null
+  if (activeBufferSource) {
     try {
-      URL.revokeObjectURL(sharedObjectUrl)
+      activeBufferSource.onended = null
+      activeBufferSource.stop()
     } catch {
       // ignore
     }
-    sharedObjectUrl = null
+    try {
+      activeBufferSource.disconnect()
+    } catch {
+      // ignore
+    }
+    activeBufferSource = null
   }
   const el = sharedAudio
   if (!el) return
@@ -50,6 +63,22 @@ function hardStopSharedAudio() {
   }
 }
 
+function ensureAudioCtx(): AudioContext | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const AC =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AC) return null
+    if (!audioUnlockCtx || audioUnlockCtx.state === 'closed') {
+      audioUnlockCtx = new AC()
+    }
+    return audioUnlockCtx
+  } catch {
+    return null
+  }
+}
+
 function ensureSharedAudio(): HTMLAudioElement {
   if (typeof window === 'undefined') {
     throw new Error('no window')
@@ -59,6 +88,13 @@ function ensureSharedAudio(): HTMLAudioElement {
     sharedAudio.preload = 'auto'
   }
   return sharedAudio
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const binary = atob(b64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+  return bytes
 }
 
 function bindActiveStop(stop: () => void): () => void {
@@ -102,47 +138,23 @@ function speakSilentUnlock(s: SpeechSynthesis) {
 }
 
 /**
- * Unlock Web Audio + a shared HTMLAudioElement inside the user gesture so later
- * async 讯飞 MP3 playback is allowed on mobile.
+ * Unlock Web Audio inside the user gesture so later async 讯飞 decode/play works
+ * on mobile (and bypasses media-src CSP entirely).
  */
 function unlockAudioContext() {
   if (typeof window === 'undefined') return
-  try {
-    const AC =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-    if (!AC) return
-    if (!audioUnlockCtx || audioUnlockCtx.state === 'closed') {
-      audioUnlockCtx = new AC()
-    }
-    if (audioUnlockCtx.state === 'suspended') {
-      void audioUnlockCtx.resume()
-    }
-  } catch {
-    // ignore
+  const ctx = ensureAudioCtx()
+  if (!ctx) return
+  if (ctx.state === 'suspended') {
+    void ctx.resume()
   }
-
+  // Brief silent buffer keeps the context "hot" across the async TTS fetch.
   try {
-    const el = ensureSharedAudio()
-    // Only prime when idle — don't interrupt an in-progress briefing clip.
-    if (el.src && !el.src.startsWith('data:') && !el.paused) {
-      return
-    }
-    const epoch = sharedAudioEpoch
-    el.volume = 0.01
-    el.src = SILENT_WAV
-    el.currentTime = 0
-    void el.play().then(() => {
-      // A newer speak/stop may have taken over the shared element — do not pause it.
-      if (epoch !== sharedAudioEpoch) return
-      if (!el.src.startsWith('data:')) return
-      try {
-        el.pause()
-        el.volume = 1
-      } catch {
-        // ignore
-      }
-    })
+    const buffer = ctx.createBuffer(1, 1, ctx.sampleRate)
+    const source = ctx.createBufferSource()
+    source.buffer = buffer
+    source.connect(ctx.destination)
+    source.start(0)
   } catch {
     // ignore
   }
@@ -396,6 +408,99 @@ function speakViaBrowser(text: string, options: SpeakOptions = {}): () => void {
   }
 }
 
+async function playBytesViaWebAudio(
+  bytes: Uint8Array,
+  isStale: () => boolean,
+  onStart: () => void,
+  onEnd: () => void,
+): Promise<boolean> {
+  const ctx = ensureAudioCtx()
+  if (!ctx) return false
+  if (ctx.state === 'suspended') {
+    try {
+      await ctx.resume()
+    } catch {
+      return false
+    }
+  }
+  if (isStale()) return false
+
+  // decodeAudioData detaches the buffer — pass a copy.
+  const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+  let audioBuffer: AudioBuffer
+  try {
+    audioBuffer = await ctx.decodeAudioData(copy)
+  } catch {
+    return false
+  }
+  if (isStale()) return false
+
+  sharedAudioEpoch += 1
+  if (activeBufferSource) {
+    try {
+      activeBufferSource.onended = null
+      activeBufferSource.stop()
+      activeBufferSource.disconnect()
+    } catch {
+      // ignore
+    }
+    activeBufferSource = null
+  }
+
+  const source = ctx.createBufferSource()
+  source.buffer = audioBuffer
+  source.connect(ctx.destination)
+  source.onended = () => {
+    if (activeBufferSource === source) activeBufferSource = null
+    onEnd()
+  }
+  activeBufferSource = source
+  try {
+    source.start(0)
+  } catch {
+    activeBufferSource = null
+    return false
+  }
+  onStart()
+  return true
+}
+
+function playViaHtmlAudioDataUrl(
+  audioBase64: string,
+  mime: string,
+  isStale: () => boolean,
+  onStart: () => void,
+  onEnd: () => void,
+  onFail: () => void,
+): void {
+  // data: avoids blob: CSP blocks; may still fail on huge payloads (hence Web Audio first).
+  sharedDataUrl = `data:${mime};base64,${audioBase64}`
+  const el = ensureSharedAudio()
+  sharedAudioEpoch += 1
+  el.onplay = null
+  el.onended = null
+  el.onerror = null
+  try {
+    el.pause()
+  } catch {
+    // ignore
+  }
+  el.volume = 1
+  el.src = sharedDataUrl
+  el.onplay = () => {
+    if (isStale()) return
+    onStart()
+  }
+  el.onended = () => onEnd()
+  el.onerror = () => onFail()
+  void el.play().catch((playErr: unknown) => {
+    if (isStale()) return
+    const name = playErr instanceof DOMException ? playErr.name : ''
+    if (name === 'AbortError') return
+    onFail()
+  })
+}
+
 function speakViaIFlytek(text: string, options: SpeakOptions = {}): () => void {
   const trimmed = text.trim()
   if (!trimmed) {
@@ -414,30 +519,26 @@ function speakViaIFlytek(text: string, options: SpeakOptions = {}): () => void {
 
   const isStale = () => cancelled || token !== speakToken
 
-  const fail = (code: SpeechSynthesisErrorEvent['error'] = 'synthesis-failed') => {
+  const fail = (
+    code: SpeechSynthesisErrorEvent['error'] = 'synthesis-failed',
+    detail?: string,
+  ) => {
     if (finished || isStale()) return
     finished = true
     hardStopSharedAudio()
-    options.onError?.({ error: code } as SpeechSynthesisErrorEvent)
+    options.onError?.({ error: code, detail } as SpeakError)
+  }
+
+  const markStarted = () => {
+    if (started || finished || isStale()) return
+    started = true
+    options.onStart?.()
   }
 
   const succeedEnd = () => {
     if (finished || isStale()) return
     finished = true
-    // Keep element; just clear handlers / blob so close doesn't leave a looping src.
-    if (sharedAudio) {
-      sharedAudio.onplay = null
-      sharedAudio.onended = null
-      sharedAudio.onerror = null
-    }
-    if (sharedObjectUrl) {
-      try {
-        URL.revokeObjectURL(sharedObjectUrl)
-      } catch {
-        // ignore
-      }
-      sharedObjectUrl = null
-    }
+    sharedDataUrl = null
     options.onEnd?.()
   }
 
@@ -449,77 +550,53 @@ function speakViaIFlytek(text: string, options: SpeakOptions = {}): () => void {
       )
       if (isStale()) return
 
-      const binary = atob(result.audioBase64)
-      const bytes = new Uint8Array(binary.length)
-      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
-      const blob = new Blob([bytes], { type: result.mimeType || 'audio/mpeg' })
+      const bytes = base64ToBytes(result.audioBase64)
+      const mime = result.mimeType || 'audio/mpeg'
 
-      if (sharedObjectUrl) {
-        try {
-          URL.revokeObjectURL(sharedObjectUrl)
-        } catch {
-          // ignore
-        }
-        sharedObjectUrl = null
-      }
-      sharedObjectUrl = URL.createObjectURL(blob)
+      // 1) Web Audio — no media-src / blob CSP issues (Power Apps friendly).
+      const played = await playBytesViaWebAudio(bytes, isStale, markStarted, succeedEnd)
+      if (played || isStale()) return
 
-      const el = ensureSharedAudio()
-      // Invalidate any pending silent-unlock pause so it cannot stop this clip.
-      sharedAudioEpoch += 1
-      el.onplay = null
-      el.onended = null
-      el.onerror = null
-      try {
-        el.pause()
-      } catch {
-        // ignore
-      }
-      el.volume = 1
-      el.src = sharedObjectUrl
-      el.onplay = () => {
-        if (started || finished || isStale()) return
-        started = true
-        options.onStart?.()
-      }
-      el.onended = () => {
-        succeedEnd()
-      }
-      el.onerror = () => {
+      // 2) HTMLAudio data: fallback (still no blob:).
+      playViaHtmlAudioDataUrl(result.audioBase64, mime, isStale, markStarted, succeedEnd, () => {
         fail('synthesis-failed')
-      }
-
-      if (isStale()) {
-        hardStopSharedAudio()
-        return
-      }
-
-      try {
-        await el.play()
-      } catch {
-        if (isStale()) return
-        fail('not-allowed')
-        return
-      }
-
-      if (isStale()) {
-        hardStopSharedAudio()
-        return
-      }
-      if (!started) {
-        started = true
-        options.onStart?.()
-      }
+      })
     } catch (err) {
       if (isStale() || controller.signal.aborted) return
       const status =
         err && typeof err === 'object' && 'status' in err
           ? Number((err as { status?: number }).status)
           : undefined
+      const detailRaw =
+        err && typeof err === 'object' && 'detail' in err
+          ? String((err as { detail?: string }).detail || '')
+          : ''
+      let detail = err instanceof Error ? err.message : '讯飞合成失败'
+      try {
+        const parsed = JSON.parse(detailRaw) as { error?: string; detail?: string }
+        detail = parsed.error || parsed.detail || detail
+      } catch {
+        if (detailRaw) detail = detailRaw.slice(0, 160)
+      }
       if (status === 503 || status === 502) {
         iflytekTtsCapable = false
       }
-      stopFallback = speakViaBrowser(trimmed, options)
+      // Power Apps / 手机浏览器上 Google speechSynthesis 基本不可用，回退只会掩盖真因。
+      const host =
+        typeof navigator !== 'undefined'
+          ? /PowerApps|MSAppHost|powerplatformusercontent/i.test(navigator.userAgent)
+          : false
+      const coarse =
+        typeof window !== 'undefined' &&
+        Boolean(window.matchMedia?.('(pointer: coarse)')?.matches)
+      if (!host && !coarse && status !== 502 && status !== 503) {
+        stopFallback = speakViaBrowser(trimmed, options)
+        return
+      }
+      fail(
+        status === 502 || status === 503 ? 'synthesis-unavailable' : 'synthesis-failed',
+        detail,
+      )
     }
   })()
 

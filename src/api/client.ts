@@ -295,15 +295,33 @@ export const api = {
     return `${window.location.origin}${API_BASE}${path}`
   },
   /** 讯飞在线语音合成 → MP3 base64（每日播报 / Copilot 自动朗读）。 */
-  speechTts: (
+  speechTts: async (
     body: { text: string; voice?: string; rate?: number },
     init?: { signal?: AbortSignal },
-  ) =>
-    request<IFlytekTtsResult>('/speech/tts', {
-      method: 'POST',
-      body: JSON.stringify(body),
-      signal: init?.signal,
-    }),
+  ) => {
+    try {
+      return await request<IFlytekTtsResult>('/speech/tts', {
+        method: 'POST',
+        body: JSON.stringify(body),
+        signal: init?.signal,
+      })
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.detail) {
+        let message = err.message
+        try {
+          const parsed = JSON.parse(err.detail) as { error?: string; detail?: string }
+          message = parsed.error || parsed.detail || err.detail
+        } catch {
+          message = err.detail.slice(0, 160)
+        }
+        throw new ApiRequestError(message, err.kind, {
+          status: err.status,
+          detail: err.detail,
+        })
+      }
+      throw err
+    }
+  },
   supportsActivityInsight,
   supportsOpportunityInsight,
   orchestrate: (

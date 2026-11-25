@@ -108,12 +108,14 @@ IFLYTEK_API_SECRET=你的APISecret
 | 安卓「讯飞语音连接失败」+ CSP 拦 `wss://` | Power Apps 未放行 WebSocket | 部署含 HTTP 语音通道的新前后端；CSP 保留 `https://salescompanion.de1.net` 即可 |
 | iOS `The operation is insecure` | 宿主未授权麦克风 | 系统/Power Apps 开麦克风，或用 Safari 打开 |
 | 仍想用 WSS | 需改 CSP | 在 connect-src **额外**加 `wss://salescompanion.de1.net` |
+| 播报失败 + 控制台 `media-src ...` 拦 `blob:` | **旧前端**仍用 `blob:` 播音频 | **重新构建并发布前端**（现已改 Web Audio，不依赖 media-src / blob）。只放行域名不够，代码必须更新到线上 |
+| 本地播报正常、线上失败 | ① 线上后端未部署 `/api/speech/tts` ② 讯飞只开通了听写未开通合成 ③ 前端仍是旧包 ④ Power Apps CSP 拦媒体 | 在电脑浏览器打开 `https://你的API/api/health` 看 `iflytekTts:true`；`POST /api/speech/tts` 应返回 audioBase64。听写≠合成，控制台要单独开通「在线语音合成」并添加发音人 |
 
 你当前 CSP 建议保持：
 
 `connect-src https://api.deepseek.com https://salescompanion.de1.net https://*.api.powerplatform.com https://*.api.powerplatformusercontent.com`
 
-（语音走 https，无需 `wss://salescompanion.de1.net`。）
+（听写 / 播报都走 https API，**无需**把 `tts-api.xfyun.cn` / `iat-api.xfyun.cn` 加进白名单，也无需 `wss://`。）
 
 ### 切换到 OpenAI gpt-6-luna
 

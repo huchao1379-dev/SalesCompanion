@@ -358,6 +358,8 @@ function NativeChat({
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const draftsStartRef = useRef<HTMLDivElement | null>(null)
   const stickToBottomRef = useRef(true)
+  /** After focusing the composer, force pin-to-bottom through keyboard animation. */
+  const forcePinBottomUntilRef = useRef(0)
   const genRef = useRef<GenerationHandle | null>(null)
   const genSeqRef = useRef(0)
   const prevDraftCountRef = useRef(0)
@@ -536,21 +538,67 @@ function NativeChat({
     return () => window.cancelAnimationFrame(id)
   }, [messages, drafts, generating])
 
+  // Soft keyboard (visualViewport shrink) — keep the latest message above the composer.
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const onViewport = () => {
+      if (composerModeRef.current !== 'text') return
+      const force = Date.now() < forcePinBottomUntilRef.current
+      if (!force && !stickToBottomRef.current) return
+      const el = bodyRef.current
+      if (!el) return
+      stickToBottomRef.current = true
+      el.scrollTop = el.scrollHeight
+    }
+    vv.addEventListener('resize', onViewport)
+    vv.addEventListener('scroll', onViewport)
+    window.addEventListener('resize', onViewport)
+    return () => {
+      vv.removeEventListener('resize', onViewport)
+      vv.removeEventListener('scroll', onViewport)
+      window.removeEventListener('resize', onViewport)
+    }
+  }, [])
+
   function onBodyScroll() {
     const el = bodyRef.current
     if (!el) return
+    // While the soft keyboard is opening, ignore "not at bottom" readings caused by
+    // the viewport shrinking mid-animation — otherwise stickToBottom flips off.
+    if (Date.now() < forcePinBottomUntilRef.current) {
+      stickToBottomRef.current = true
+      return
+    }
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight
     const nearBottom = distance < NEAR_BOTTOM_PX
     stickToBottomRef.current = nearBottom
     if (nearBottom) setShowNewMsgHint(false)
   }
 
-  function scrollToLatest() {
+  function scrollToLatest(behavior: ScrollBehavior = 'smooth') {
     const el = bodyRef.current
     if (!el) return
     stickToBottomRef.current = true
     setShowNewMsgHint(false)
-    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    // Immediate jump first (mobile keyboard often ignores a lone smooth scroll).
+    el.scrollTop = el.scrollHeight
+    if (behavior === 'smooth') {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    }
+  }
+
+  /** Call when opening the soft keyboard — pin chat to the newest message. */
+  function pinToLatestForKeyboard() {
+    stickToBottomRef.current = true
+    forcePinBottomUntilRef.current = Date.now() + 900
+    scrollToLatest('auto')
+    window.requestAnimationFrame(() => {
+      scrollToLatest('auto')
+      window.setTimeout(() => scrollToLatest('auto'), 120)
+      window.setTimeout(() => scrollToLatest('auto'), 320)
+      window.setTimeout(() => scrollToLatest('auto'), 560)
+    })
   }
 
   function setConversationState(next: ConversationState) {
@@ -892,7 +940,12 @@ function NativeChat({
     setComposerMode('text')
     setVoiceHint('')
     setPendingSpeakText('')
-    window.setTimeout(() => inputRef.current?.focus(), 40)
+    // Keyboard opening shrinks the viewport — pin to the newest messages.
+    pinToLatestForKeyboard()
+    window.setTimeout(() => {
+      inputRef.current?.focus()
+      pinToLatestForKeyboard()
+    }, 40)
   }
 
   /** Same tap-to-toggle pattern as 新建拜访 MicButton — avoids Android system ASR / long-press menus. */
@@ -1656,6 +1709,13 @@ function NativeChat({
               autoCapitalize="sentences"
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onComposerKeyDown}
+              onFocus={() => {
+                pinToLatestForKeyboard()
+              }}
+              onClick={() => {
+                // Some Android browsers focus without resizing until the next tap frame.
+                pinToLatestForKeyboard()
+              }}
               aria-label="请输入，Enter 发送，Shift+Enter 换行"
             />
           ) : (

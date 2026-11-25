@@ -42,6 +42,18 @@ export const apiRouter = Router()
 apiRouter.get('/health', async (_req, res) => {
   ensureAgentsRegistered()
   const catalog = getCatalogSummary()
+  // Dataverse 抖动不应让整份 health 500 — 前端靠它判断讯飞 TTS 是否可用。
+  let accounts = 0
+  let dataverseOk = true
+  try {
+    accounts = (await repository.listAccounts()).length
+  } catch (error) {
+    dataverseOk = false
+    console.warn(
+      '[health] listAccounts failed:',
+      error instanceof Error ? error.message : error,
+    )
+  }
   res.json({
     ok: true,
     aiProvider: config.aiProvider,
@@ -56,8 +68,9 @@ apiRouter.get('/health', async (_req, res) => {
     copilotstudio: hasCopilotStudioConfig(),
     dataverseRemote: repository.mode === 'dataverse-webapi',
     dataverseMode: repository.mode,
+    dataverseOk,
     promptVersion: config.promptVersion,
-    accounts: (await repository.listAccounts()).length,
+    accounts,
     agents: catalog.agents.length,
     skills: catalog.skills.length,
     note:

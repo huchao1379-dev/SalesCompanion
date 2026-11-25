@@ -248,17 +248,25 @@ export function BriefMe({ open, onClose, playRequestId = 0 }: Props) {
         } else {
           userArmedPlayRef.current = false
         }
-        setTtsError(
-          blocked
-            ? autoPlay
-              ? '浏览器拦截了自动播报，点任意处或播放按钮即可开始。'
-              : '播报被拦截，请再点一次播放；若仍失败请检查麦克风/媒体权限。'
-            : error.error === 'language-unavailable' ||
-                error.error === 'voice-unavailable' ||
-                error.error === 'synthesis-unavailable'
-              ? '当前无可用中文语音。请确认讯飞已开通「在线语音合成」，或检查系统语音设置。'
-              : '语音播报启动失败。请确认服务端已配置讯飞合成，或稍后重试。',
-        )
+        {
+          const detail =
+            'detail' in error && typeof (error as { detail?: string }).detail === 'string'
+              ? (error as { detail?: string }).detail?.trim()
+              : ''
+          setTtsError(
+            blocked
+              ? autoPlay
+                ? '浏览器拦截了自动播报，点任意处或播放按钮即可开始。'
+                : '播报被拦截，请再点一次播放；若仍失败请检查麦克风/媒体权限。'
+              : detail
+                ? `播报失败：${detail.slice(0, 120)}`
+                : error.error === 'language-unavailable' ||
+                    error.error === 'voice-unavailable' ||
+                    error.error === 'synthesis-unavailable'
+                  ? '当前无可用中文语音。请确认讯飞控制台已开通「在线语音合成」并添加发音人，且线上已部署含 /api/speech/tts 的后端。'
+                  : '语音播报启动失败。请确认线上已部署新前后端，connect-src 已放行 API 域名，讯飞已开通合成服务。',
+          )
+        }
       },
     })
   }, [])
