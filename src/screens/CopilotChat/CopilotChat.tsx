@@ -355,7 +355,6 @@ function NativeChat({
     listConversations(),
   )
   const [composerMode, setComposerMode] = useState<'text' | 'voice'>('text')
-  const [voiceHint, setVoiceHint] = useState('')
   /** When auto-TTS is blocked, keep reply text for one-tap replay inside a user gesture. */
   const [pendingSpeakText, setPendingSpeakText] = useState('')
   const [syncNotice, setSyncNotice] = useState('')
@@ -398,14 +397,7 @@ function NativeChat({
     if (!speech.supported) return
     voicePreferredRef.current = true
     setComposerMode('voice')
-    setVoiceHint('点按说话')
   }, [speech.supported, speech.provider])
-
-  // Avoid speaking into a cold engine — first syllables are often dropped before ready.
-  useEffect(() => {
-    if (composerMode !== 'voice' || !speech.listening) return
-    setVoiceHint(speech.ready ? '正在听…' : '准备中…')
-  }, [composerMode, speech.listening, speech.ready])
 
   useEffect(() => {
     return () => {
@@ -820,7 +812,6 @@ function NativeChat({
             onError: () => {
               stopSpeakRef.current = null
               setPendingSpeakText(spoken)
-              setVoiceHint('自动播报被拦截，点此播报回复，或继续点按麦克风。')
             },
           })
         } else {
@@ -876,15 +867,11 @@ function NativeChat({
 
   function enterVoiceMode() {
     if (busy || generating) return
-    if (!speech.supported) {
-      setVoiceHint('当前浏览器不支持语音识别，请继续用键盘输入。')
-      return
-    }
+    if (!speech.supported) return
     // Arm TTS inside this tap so later auto-speak after a voice turn is allowed.
     unlockSpeech()
     setPendingSpeakText('')
     setComposerMode('voice')
-    setVoiceHint('点按说话')
     inputRef.current?.blur()
   }
 
@@ -893,7 +880,6 @@ function NativeChat({
     disarmSpeechGate()
     if (speech.listening) void speech.stop({ graceMs: 0 })
     setComposerMode('text')
-    setVoiceHint('')
     setPendingSpeakText('')
     // Keyboard opening shrinks the viewport — pin to the newest messages.
     pinToLatestForKeyboard()
@@ -927,15 +913,12 @@ function NativeChat({
       lang: 'zh-CN',
       onEnd: () => {
         stopSpeakRef.current = null
-        setVoiceHint('点按说话')
       },
       onError: () => {
         stopSpeakRef.current = null
         setPendingSpeakText(text)
-        setVoiceHint('播报失败，请再点一次')
       },
     })
-    setVoiceHint('正在播报…')
   }
 
   function beginVoiceTurn() {
@@ -946,7 +929,6 @@ function NativeChat({
     // Prime TTS inside this tap; keep-alive starts only after stop (mic must stay free).
     unlockSpeech()
     speakReplyAfterTurnRef.current = true
-    setVoiceHint('准备中，请稍等再开口…')
     speech.start('zh-CN')
   }
 
@@ -955,15 +937,12 @@ function NativeChat({
     unlockSpeech()
     armSpeechGate()
     speakReplyAfterTurnRef.current = true
-    setVoiceHint('正在收尾识别…')
     const text = await speech.stop()
     if (text.trim()) {
-      setVoiceHint('点按说话')
       void send(text)
     } else {
       speakReplyAfterTurnRef.current = false
       disarmSpeechGate()
-      setVoiceHint(speech.error || '未识别到语音，请重试')
     }
   }
 
@@ -988,7 +967,8 @@ function NativeChat({
       try {
         payloadAttachments = await toOrchestratorAttachments(pending)
       } catch {
-        setVoiceHint('附件读取失败，请重试或改用文字说明。')
+        setSyncNotice('附件读取失败，请重试或改用文字说明。')
+        window.setTimeout(() => setSyncNotice(''), 3200)
         return
       }
     }
