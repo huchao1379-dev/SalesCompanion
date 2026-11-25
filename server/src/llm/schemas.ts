@@ -213,6 +213,14 @@ export const generalAssistOutputSchema = z.object({
     .max(4)
     .optional(),
   followUps: z.array(z.string().min(1).max(80)).max(4).optional(),
+  /** When user asks to write/send email, fill structured fields for the send modal. */
+  emailDraft: z
+    .object({
+      to: z.string().max(200).default(''),
+      subject: z.string().min(1).max(200),
+      body: z.string().min(1).max(4000),
+    })
+    .optional(),
   confidence,
   usedWeb: z.boolean().optional(),
   sources: z

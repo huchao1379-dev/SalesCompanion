@@ -1,5 +1,10 @@
 import './MessageUiCard.css'
-import type { MessageUiBlock, MessageUiMetric, ReviewFinding } from '../agents/types'
+import type {
+  EmailDraftFields,
+  MessageUiBlock,
+  MessageUiMetric,
+  ReviewFinding,
+} from '../agents/types'
 import { ContactCard } from './ContactCard'
 import { IconSpark } from './DashIcons'
 
@@ -9,6 +14,10 @@ type Props = {
   onOpenOpportunity?: () => void
   /** Clarify / follow-up chips can send text back to the composer. */
   onSendExample?: (text: string) => void
+  /** Open editable email draft modal (Power Automate send). */
+  onOpenEmailDraft?: (draft: EmailDraftFields) => void
+  /** After cloud-flow send succeeds — hide draft card / edit action. */
+  emailSent?: boolean
 }
 
 function splitMetrics(metrics: MessageUiMetric[] = []) {
@@ -134,7 +143,38 @@ function SectionsBlock({ sections }: { sections?: MessageUiBlock['sections'] }) 
   )
 }
 
-export function MessageUiCard({ ui, onOpenAccount, onOpenOpportunity, onSendExample }: Props) {
+function EmailDraftChip({
+  draft,
+  onOpen,
+}: {
+  draft: EmailDraftFields
+  onOpen?: (draft: EmailDraftFields) => void
+}) {
+  if (!onOpen) return null
+  return (
+    <button
+      type="button"
+      className="msg-ui__email-card"
+      onClick={() => onOpen(draft)}
+      aria-label="打开邮件草稿"
+    >
+      <span className="msg-ui__email-card-kicker">邮件草稿</span>
+      <span className="msg-ui__email-card-subject">{draft.subject || '（无主题）'}</span>
+      <span className="msg-ui__email-card-meta">
+        {draft.to.trim() ? `收件人：${draft.to}` : '收件人待填写'} · 点击编辑并发送
+      </span>
+    </button>
+  )
+}
+
+export function MessageUiCard({
+  ui,
+  onOpenAccount,
+  onOpenOpportunity,
+  onSendExample,
+  onOpenEmailDraft,
+  emailSent = false,
+}: Props) {
   const supported =
     ui.type === 'account_pulse' ||
     ui.type === 'metric_strip' ||
@@ -159,6 +199,10 @@ export function MessageUiCard({ ui, onOpenAccount, onOpenOpportunity, onSendExam
   const otherItems = (ui.items || []).filter(
     (i) => i.kind !== 'opportunity' && i.kind !== 'contact',
   )
+  const emailDraft = !emailSent ? ui.emailDraft : undefined
+  const showEmailSend =
+    Boolean(emailDraft && onOpenEmailDraft) &&
+    Boolean(ui.actions?.some((a) => a.id === 'edit_send_email'))
 
   if (ui.type === 'clarify') {
     return (
@@ -187,7 +231,6 @@ export function MessageUiCard({ ui, onOpenAccount, onOpenOpportunity, onSendExam
             ))}
           </div>
         ) : null}
-        {ui.footnote ? <p className="msg-ui__footnote">{ui.footnote}</p> : null}
       </div>
     )
   }
@@ -196,7 +239,6 @@ export function MessageUiCard({ ui, onOpenAccount, onOpenOpportunity, onSendExam
     return (
       <div className={`msg-ui msg-ui--${ui.type}`}>
         {ui.title ? <p className="msg-ui__title">{ui.title}</p> : null}
-        {ui.originLabel ? <p className="msg-ui__origin">{ui.originLabel}</p> : null}
         {primary.length || secondary.length ? (
           <>
             <MetricGrid metrics={primary} />
@@ -204,13 +246,20 @@ export function MessageUiCard({ ui, onOpenAccount, onOpenOpportunity, onSendExam
           </>
         ) : null}
         <SectionsBlock sections={ui.sections} />
-        {ui.hint ? (
-          <p className="msg-ui__hint" role="note">
-            {ui.hint}
-          </p>
+        {emailDraft ? <EmailDraftChip draft={emailDraft} onOpen={onOpenEmailDraft} /> : null}
+        {emailSent ? <p className="msg-ui__email-sent">邮件已发送</p> : null}
+        {showEmailSend ? (
+          <div className="msg-ui__actions">
+            <button
+              type="button"
+              className="chat-action-link"
+              onClick={() => onOpenEmailDraft?.(emailDraft!)}
+            >
+              {ui.actions?.find((a) => a.id === 'edit_send_email')?.label || '编辑并发送邮件'}
+              <span aria-hidden>→</span>
+            </button>
+          </div>
         ) : null}
-        {ui.footnote ? <p className="msg-ui__footnote">{ui.footnote}</p> : null}
-        <FollowUpChips chips={followUps} onSendExample={onSendExample} />
       </div>
     )
   }
@@ -232,12 +281,6 @@ export function MessageUiCard({ ui, onOpenAccount, onOpenOpportunity, onSendExam
           </dl>
         ) : null}
         <FindingsList findings={ui.findings || []} />
-        {ui.hint ? (
-          <p className="msg-ui__hint" role="note">
-            {ui.hint}
-          </p>
-        ) : null}
-        {ui.footnote ? <p className="msg-ui__footnote">{ui.footnote}</p> : null}
         <FollowUpChips chips={followUps} onSendExample={onSendExample} />
       </div>
     )
@@ -248,7 +291,6 @@ export function MessageUiCard({ ui, onOpenAccount, onOpenOpportunity, onSendExam
       <div className="msg-ui msg-ui--review">
         {ui.title ? <p className="msg-ui__title">{ui.title}</p> : null}
         <FindingsList findings={ui.findings || []} />
-        {ui.footnote ? <p className="msg-ui__footnote">{ui.footnote}</p> : null}
         <FollowUpChips chips={followUps} onSendExample={onSendExample} />
       </div>
     )
@@ -319,11 +361,8 @@ export function MessageUiCard({ ui, onOpenAccount, onOpenOpportunity, onSendExam
         </p>
       ) : null}
 
-      {ui.hint ? (
-        <p className="msg-ui__hint" role="note">
-          {ui.hint}
-        </p>
-      ) : null}
+      {emailDraft ? <EmailDraftChip draft={emailDraft} onOpen={onOpenEmailDraft} /> : null}
+      {emailSent ? <p className="msg-ui__email-sent">邮件已发送</p> : null}
 
       {ui.actions && ui.actions.length > 0 ? (
         <div className="msg-ui__actions">
@@ -354,13 +393,23 @@ export function MessageUiCard({ ui, onOpenAccount, onOpenOpportunity, onSendExam
                 </button>
               )
             }
+            if (action.id === 'edit_send_email' && emailDraft && onOpenEmailDraft) {
+              return (
+                <button
+                  key={action.id}
+                  type="button"
+                  className="chat-action-link"
+                  onClick={() => onOpenEmailDraft(emailDraft)}
+                >
+                  {action.label}
+                  <span aria-hidden>→</span>
+                </button>
+              )
+            }
             return null
           })}
         </div>
       ) : null}
-
-      {ui.footnote ? <p className="msg-ui__footnote">{ui.footnote}</p> : null}
-      <FollowUpChips chips={followUps} onSendExample={onSendExample} />
     </div>
   )
 }

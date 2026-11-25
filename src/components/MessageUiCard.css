@@ -237,6 +237,83 @@
   padding-top: 0.05rem;
 }
 
+.msg-ui__email-sent {
+  margin: 0.15rem 0 0;
+  padding: 0.45rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  background: rgba(236, 253, 245, 0.92);
+  color: #047857;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.msg-ui__email-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.18rem;
+  width: 100%;
+  text-align: left;
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  background: linear-gradient(165deg, rgba(239, 246, 255, 0.95), rgba(248, 250, 252, 0.9));
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+.msg-ui__email-card:hover {
+  border-color: rgba(37, 99, 235, 0.4);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.1);
+  transform: translateY(-1px);
+}
+
+.msg-ui__email-card:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.55);
+  outline-offset: 2px;
+}
+
+.msg-ui__email-card-kicker {
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #2563eb;
+}
+
+.msg-ui__email-card-subject {
+  font-size: 0.92rem;
+  font-weight: 720;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.msg-ui__email-card-meta {
+  font-size: 0.72rem;
+  color: #64748b;
+  line-height: 1.35;
+}
+
+:root[data-theme='dark'] .msg-ui__email-card {
+  background: linear-gradient(165deg, rgba(30, 58, 138, 0.28), var(--surface-muted));
+  border-color: rgba(96, 165, 250, 0.28);
+}
+
+:root[data-theme='dark'] .msg-ui__email-card-kicker {
+  color: #93c5fd;
+}
+
+:root[data-theme='dark'] .msg-ui__email-card-subject {
+  color: var(--text);
+}
+
 .msg-ui__footnote {
   margin: 0;
   font-size: 0.68rem;

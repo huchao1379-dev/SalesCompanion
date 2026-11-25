@@ -3,14 +3,15 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { ApiRequestError } from '../../api/client'
 import type {
   AgentMessage,
-  AgentStep,
   DraftPayload,
+  EmailDraftFields,
   MessageFailureKind,
   OrchestratorAttachment,
 } from '../../agents/types'
 import { copilotOrchestrate } from '../../agents/copilotStudioClient'
 import { getOrchestratorMode, orchestrate } from '../../agents/orchestratorClient'
 import { DraftCard } from '../../components/DraftCard'
+import { EmailComposeModal } from '../../components/EmailComposeModal'
 import {
   IconBack,
   IconChevronDown,
@@ -39,7 +40,6 @@ import {
   type ConversationState,
   type ConversationSummary,
 } from '../../data/conversationStore'
-import { api } from '../../api/client'
 import {
   confirmAndSyncDetailed,
   discardDraft,
@@ -47,6 +47,7 @@ import {
   refreshDraftsFromApi,
   upsertDraft,
 } from '../../data/dataverse'
+import { sendEmailViaPowerAutomate } from '../../data/sendEmailFlow'
 import { canConfirmDraft } from '../../data/syncStatus'
 import { useSpeechRecognition } from '../../speech/useSpeechRecognition'
 import {
@@ -304,32 +305,6 @@ function failureLabel(kind?: MessageFailureKind) {
   return '请求失败'
 }
 
-function confidenceLabel(m: AgentMessage) {
-  if (!(m.confidence > 0)) return ''
-  if (m.confidence_kind === 'extraction') return '提取置信'
-  if (m.confidence_kind === 'composite') return '综合置信'
-  return '回答置信'
-}
-
-function footprintSteps(m: AgentMessage) {
-  const chain = (m.agent_chain || []).filter(Boolean)
-  const unique = [...new Set(chain.map((c) => c.trim()).filter(Boolean))]
-  return unique.filter(
-    (c) =>
-      !/^orchestrator$/i.test(c) &&
-      c !== BOT_NAME &&
-      c !== m.agent_name &&
-      !/Agent$/i.test(c),
-  )
-}
-
-function stepStatusLabel(status: AgentStep['status']) {
-  if (status === 'fallback') return '规则兜底'
-  if (status === 'error') return '失败'
-  if (status === 'skipped') return '跳过'
-  return '完成'
-}
-
 /** Plain text for mobile TTS — strip markdown noise from assistant replies. */
 function stripSpeakable(text: string) {
   return text
@@ -384,7 +359,12 @@ function NativeChat({
   /** When auto-TTS is blocked, keep reply text for one-tap replay inside a user gesture. */
   const [pendingSpeakText, setPendingSpeakText] = useState('')
   const [syncNotice, setSyncNotice] = useState('')
-  const [webSearchEnabled, setWebSearchEnabled] = useState(false)
+  const [emailDraft, setEmailDraft] = useState<EmailDraftFields | null>(null)
+  const [emailSourceMessageId, setEmailSourceMessageId] = useState<string | null>(null)
+  const [sentEmailMessageIds, setSentEmailMessageIds] = useState<Set<string>>(() => new Set())
+  const [emailModalOpen, setEmailModalOpen] = useState(false)
+  const [emailSending, setEmailSending] = useState(false)
+  const [emailSendError, setEmailSendError] = useState<string | null>(null)
   const voicePreferredRef = useRef(false)
   /** After a voice turn, auto-speak the assistant reply (needs unlockSpeech in the mic gesture). */
   const speakReplyAfterTurnRef = useRef(false)
@@ -412,40 +392,19 @@ function NativeChat({
     return () => window.clearTimeout(t)
   }, [])
 
-  useEffect(() => {
-    let cancelled = false
-    void api
-      .health()
-      .then((health) => {
-        if (!cancelled) setWebSearchEnabled(Boolean(health.capabilities?.webSearch))
-      })
-      .catch(() => {
-        if (!cancelled) setWebSearchEnabled(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  // Voice-First: prefer mic when ASR is available (讯飞或浏览器 Web Speech)。
+  // Voice-First: prefer mic when ASR is available.
   useEffect(() => {
     if (voicePreferredRef.current) return
     if (!speech.supported) return
     voicePreferredRef.current = true
     setComposerMode('voice')
-    setVoiceHint(
-      speech.provider === 'iflytek'
-        ? '点按开始录音（讯飞）；再次点按结束并发送'
-        : '点按开始录音；再次点按结束并发送',
-    )
+    setVoiceHint('点按说话')
   }, [speech.supported, speech.provider])
 
   // Avoid speaking into a cold engine — first syllables are often dropped before ready.
   useEffect(() => {
     if (composerMode !== 'voice' || !speech.listening) return
-    setVoiceHint(
-      speech.ready ? '正在听你说话…点按结束并发送' : '准备中，请稍等再开口…',
-    )
+    setVoiceHint(speech.ready ? '正在听…' : '准备中…')
   }, [composerMode, speech.listening, speech.ready])
 
   useEffect(() => {
@@ -925,11 +884,7 @@ function NativeChat({
     unlockSpeech()
     setPendingSpeakText('')
     setComposerMode('voice')
-    setVoiceHint(
-      speech.provider === 'iflytek'
-        ? '点按开始录音（讯飞）；再次点按结束并发送'
-        : '点按开始录音；再次点按结束并发送',
-    )
+    setVoiceHint('点按说话')
     inputRef.current?.blur()
   }
 
@@ -972,19 +927,15 @@ function NativeChat({
       lang: 'zh-CN',
       onEnd: () => {
         stopSpeakRef.current = null
-        setVoiceHint(
-          speech.provider === 'iflytek'
-            ? '点按开始录音（讯飞）；再次点按结束并发送'
-            : '点按开始录音；再次点按结束并发送',
-        )
+        setVoiceHint('点按说话')
       },
       onError: () => {
         stopSpeakRef.current = null
         setPendingSpeakText(text)
-        setVoiceHint('播报失败，请再点一次或检查系统语音权限。')
+        setVoiceHint('播报失败，请再点一次')
       },
     })
-    setVoiceHint('正在播报回复…')
+    setVoiceHint('正在播报…')
   }
 
   function beginVoiceTurn() {
@@ -1007,16 +958,12 @@ function NativeChat({
     setVoiceHint('正在收尾识别…')
     const text = await speech.stop()
     if (text.trim()) {
-      setVoiceHint(
-        speech.provider === 'iflytek'
-          ? '点按开始录音（讯飞）；再次点按结束并发送'
-          : '点按开始录音；再次点按结束并发送',
-      )
+      setVoiceHint('点按说话')
       void send(text)
     } else {
       speakReplyAfterTurnRef.current = false
       disarmSpeechGate()
-      setVoiceHint(speech.error || '没有识别到语音，可以再说一次，或切回键盘输入。')
+      setVoiceHint(speech.error || '未识别到语音，请重试')
     }
   }
 
@@ -1130,6 +1077,40 @@ function NativeChat({
       setSyncNotice('确认失败，请检查网络后重试。')
     } finally {
       setBusy(false)
+    }
+  }
+
+  function openEmailDraft(messageId: string, draft: EmailDraftFields) {
+    setEmailSourceMessageId(messageId)
+    setEmailDraft(draft)
+    setEmailSendError(null)
+    setEmailModalOpen(true)
+  }
+
+  async function handleSendEmail(next: EmailDraftFields) {
+    setEmailSending(true)
+    setEmailSendError(null)
+    try {
+      await sendEmailViaPowerAutomate(next)
+      const sourceId = emailSourceMessageId
+      if (sourceId) {
+        setSentEmailMessageIds((prev) => {
+          const nextIds = new Set(prev)
+          nextIds.add(sourceId)
+          return nextIds
+        })
+      }
+      setEmailModalOpen(false)
+      setEmailDraft(null)
+      setEmailSourceMessageId(null)
+      setSyncNotice('邮件已发送')
+      window.setTimeout(() => setSyncNotice(''), 2800)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '发送失败，请稍后重试'
+      setEmailSendError(message)
+      setSyncNotice('')
+    } finally {
+      setEmailSending(false)
     }
   }
 
@@ -1345,12 +1326,7 @@ function NativeChat({
                 ))}
               </ol>
             </div>
-            <p className="chat-empty__hint">
-              语音优先：点按下方开始录音，再次点按结束并发送；点键盘可切回文字。也可点快捷入口或上传图片/文本附件（附件会尝试识别，复杂 OCR 不在 Demo 范围）。
-              {webSearchEnabled
-                ? ' 已启用网页检索，可直接问公开政策或资料。'
-                : ' 通用问答可用；实时网页检索需在 server/.env 配置 WEB_SEARCH_API_KEY。'}
-            </p>
+            <p className="chat-empty__hint">点快捷入口开始，或直接输入 / 语音提问。</p>
           </div>
         ) : (
           <div className="chat-screen__feed">
@@ -1359,8 +1335,6 @@ function NativeChat({
                 {messages.map((m, index) => {
                   const isUser = m.role === 'user'
                   const showTime = shouldShowTimestamp(messages, index)
-                  const chainSteps = !isUser ? footprintSteps(m) : []
-                  const runSteps = !isUser ? m.steps || [] : []
                   const pending = m.deliveryStatus === 'pending'
                   const stopped = m.deliveryStatus === 'stopped'
                   const errored = m.deliveryStatus === 'error'
@@ -1370,7 +1344,6 @@ function NativeChat({
                   const uiHasAccountAction = Boolean(
                     m.ui?.actions?.some((a) => a.id === 'open_account'),
                   )
-                  const showConfidence = !isUser && !pending && !errored && m.confidence > 0
                   const showAccountLink =
                     Boolean(accountKey && onOpenAccount) &&
                     !isUser &&
@@ -1378,7 +1351,6 @@ function NativeChat({
                     !pending &&
                     !errored &&
                     !uiHasAccountAction
-                  const showSteps = !isUser && turnEnd && !pending && (runSteps.length > 0 || chainSteps.length > 1)
                   const timeLabel = pending
                     ? '正在回复'
                     : isUser
@@ -1387,9 +1359,12 @@ function NativeChat({
                         ? `已停止 · ${formatMessageTime(m.completedAt || m.createdAt)}`
                         : formatMessageTime(m.completedAt || m.createdAt)
                   const showTimeRow = showTime || pending
-                  const showSourceRow = !isUser && !pending && !errored
+                  const realSources = (m.sources || []).filter(
+                    (s) => s.ref !== 'none' && s.label !== '无来源',
+                  )
+                  const showSourceRow =
+                    !isUser && !pending && !errored && realSources.length > 0
                   const showFooter = showSourceRow || showTimeRow
-                  const hasFallbackStep = runSteps.some((step) => step.status === 'fallback')
 
                   return (
                     <div
@@ -1405,16 +1380,6 @@ function NativeChat({
                             <span className="chat-row__bot-name">{messageAgentName(m)}</span>
                             {m.agent_id && m.agent_id !== messageAgentName(m) ? (
                               <span className="chat-row__agent-id">{m.agent_id}</span>
-                            ) : null}
-                            {!isUser && !pending ? (
-                              <span className="chat-row__ai-badge" title="AI 生成内容，写入前可编辑确认">
-                                AI 生成
-                              </span>
-                            ) : null}
-                            {hasFallbackStep ? (
-                              <span className="chat-row__degraded" title="本回合含规则兜底步骤">
-                                规则兜底
-                              </span>
                             ) : null}
                           </div>
                           {pending ? (
@@ -1454,8 +1419,10 @@ function NativeChat({
                         {hasUiCard && m.ui ? (
                           <MessageUiCard
                             ui={m.ui}
+                            emailSent={sentEmailMessageIds.has(m.id)}
                             onOpenAccount={onOpenAccount}
                             onOpenOpportunity={onOpenOpportunity}
+                            onOpenEmailDraft={(draft) => openEmailDraft(m.id, draft)}
                             onSendExample={(text) => {
                               void send(text)
                             }}
@@ -1505,49 +1472,15 @@ function NativeChat({
                           </div>
                         ) : null}
 
-                        {showSteps ? (
-                          <details className="chat-steps">
-                            <summary>
-                              执行步骤
-                              {runSteps.some((step) => step.status === 'fallback') ? (
-                                <span className="chat-steps__fallback">含规则兜底</span>
-                              ) : null}
-                            </summary>
-                            <ol>
-                              {runSteps.length > 0
-                                ? runSteps.map((step) => (
-                                    <li key={`${step.agentId}-${step.latencyMs}`}>
-                                      <span>{step.agentName}</span>
-                                      <span className={`chat-steps__status is-${step.status}`}>
-                                        {stepStatusLabel(step.status)}
-                                      </span>
-                                      <span className="chat-steps__latency">{step.latencyMs}ms</span>
-                                    </li>
-                                  ))
-                                : chainSteps.map((step) => <li key={step}>{step}</li>)}
-                            </ol>
-                          </details>
-                        ) : null}
-
-                        {showConfidence || showAccountLink ? (
+                        {showAccountLink && accountKey ? (
                           <div className="chat-bubble__meta">
-                            {showConfidence ? (
-                              <span
-                                className={`confidence confidence--${m.confidence_kind || 'answer'}`}
-                                title="AI 回答/提取的置信度，不等于事实准确率"
-                              >
-                                {confidenceLabel(m)} {(m.confidence * 100).toFixed(0)}%
-                              </span>
-                            ) : null}
-                            {showAccountLink && accountKey ? (
-                              <button
-                                type="button"
-                                className="chat-action-link"
-                                onClick={() => onOpenAccount?.(accountKey)}
-                              >
-                                查看客户画像
-                              </button>
-                            ) : null}
+                            <button
+                              type="button"
+                              className="chat-action-link"
+                              onClick={() => onOpenAccount?.(accountKey)}
+                            >
+                              查看客户画像
+                            </button>
                           </div>
                         ) : null}
                       </article>
@@ -1556,7 +1489,7 @@ function NativeChat({
                         <div className="chat-row__footer">
                           {showSourceRow ? (
                             <div className="chat-row__sources" aria-label="信息来源">
-                              <SourceChips sources={m.sources} showEmpty />
+                              <SourceChips sources={realSources} />
                             </div>
                           ) : null}
                           {showTimeRow ? (
@@ -1728,10 +1661,8 @@ function NativeChat({
                 pendingSpeakText
                   ? '点按播报回复'
                   : speech.listening
-                    ? '点按结束录音并发送'
-                    : speech.provider === 'iflytek'
-                      ? '点按开始录音（讯飞）'
-                      : '点按开始录音'
+                    ? '点按结束录音'
+                    : '点按说话'
               }
               aria-pressed={speech.listening}
               disabled={busy || generating || (!speech.supported && !pendingSpeakText)}
@@ -1752,12 +1683,9 @@ function NativeChat({
                   ? '点按播报回复'
                   : speech.listening
                     ? speech.ready
-                      ? '点按结束并发送'
+                      ? '点按结束'
                       : '准备中…'
-                    : voiceHint ||
-                      (speech.provider === 'iflytek'
-                        ? '点按开始录音（讯飞）'
-                        : '点按开始录音')}
+                    : '点按说话'}
               </span>
             </button>
           )}
@@ -1808,17 +1736,27 @@ function NativeChat({
           )}
         </form>
 
-        {voiceHint && composerMode === 'text' ? (
-          <p className="chat-dock__voice-status" role="status">
-            {voiceHint}
-          </p>
-        ) : null}
         {composerMode === 'voice' && !speech.supported ? (
           <p className="chat-dock__voice-status is-warn" role="status">
-            当前浏览器不支持语音识别，请点键盘按钮继续输入。
+            当前浏览器不支持语音识别
           </p>
         ) : null}
       </div>
+
+      <EmailComposeModal
+        open={emailModalOpen}
+        draft={emailDraft}
+        busy={emailSending}
+        error={emailSendError}
+        onClose={() => {
+          if (emailSending) return
+          setEmailModalOpen(false)
+          setEmailSendError(null)
+        }}
+        onSend={(next) => {
+          void handleSendEmail(next)
+        }}
+      />
     </section>
   )
 }

@@ -24,10 +24,22 @@ describe('general assist fallback templates', () => {
     assert.equal(pitch.title, '拜访话术要点')
   })
 
+  it('returns structured emailDraft for follow-up mail requests', () => {
+    const mail = heuristicAssist('帮我写一封拜访后的跟进邮件', '仁济医院')
+    assert.equal(mail.title, '跟进邮件草稿')
+    assert.ok(mail.emailDraft)
+    assert.match(mail.emailDraft!.subject, /沟通|仁济/)
+    assert.ok(mail.emailDraft!.body.length > 20)
+
+    const alt = heuristicAssist('帮我写一份跟进邮件')
+    assert.ok(alt.emailDraft?.subject)
+    assert.ok(alt.emailDraft?.body)
+  })
+
   it('formats timeout and parse errors for steps/logs', () => {
     const timeout = new Error('The operation was aborted due to timeout')
     timeout.name = 'TimeoutError'
-    assert.equal(formatGeneralAssistError(timeout), 'DeepSeek/工具请求超时')
+    assert.equal(formatGeneralAssistError(timeout), 'LLM/工具请求超时')
 
     assert.match(
       formatGeneralAssistError(new Error('No JSON object in model output')),

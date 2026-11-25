@@ -2,7 +2,7 @@
  * General assistant Domain Agent — sales coaching, writing help, optional web tools.
  */
 import type { DomainAgent } from './agentTypes.js'
-import type { AgentMessage, MessageUiBlock, SourceRef } from '../types.js'
+import type { AgentMessage, EmailDraftFields, MessageUiBlock, SourceRef } from '../types.js'
 import {
   chatStructured,
   chatWithTools,
@@ -112,6 +112,7 @@ export function heuristicAssist(
   sections: NonNullable<MessageUiBlock['sections']>
   followUps: string[]
   confidence: number
+  emailDraft?: EmailDraftFields
 } {
   const t = utterance.trim()
   const ctx = accountName ? `（当前对话客户：${accountName}）` : ''
@@ -163,30 +164,31 @@ export function heuristicAssist(
   }
 
   if (/邮件|email|跟进信|感谢信/i.test(t)) {
+    const subject = `关于监护仪方案的进一步沟通${accountName ? `｜${accountName}` : ''}`
+    const body = `张主任您好：
+
+感谢今日交流。根据您提到的科室需求，我们整理了对应型号的配置与部署要点，方便您内部讨论。若方便，建议下周安排 30 分钟确认标书细节与交付节奏。我可按您的时间发送材料或约会议。
+
+此致
+敬礼`
     return {
       title: '跟进邮件草稿',
-      answer: `下面是一封可直接改写发送的跟进邮件草稿${ctx}。请按真实拜访内容核对后发送——这不是 CRM 里的已确认事实。`,
+      answer: `已生成跟进邮件草稿${ctx}。可点击下方草稿编辑后发送。`,
       sections: [
         {
           heading: '结论',
           bullets: [{ text: '先致谢 → 复述对方兴趣点 → 约定下一步 → 附上你可提供的材料。' }],
         },
         {
-          heading: '建议正文',
-          bullets: [
-            {
-              text: `主题：关于监护仪方案的进一步沟通${accountName ? `｜${accountName}` : ''}`,
-            },
-            {
-              text: '张主任您好：感谢今日交流。根据您提到的科室需求，我们整理了对应型号的配置与部署要点，方便您内部讨论。若方便，建议下周安排 30 分钟确认标书细节与交付节奏。我可按您的时间发送材料或约会议。',
-            },
-          ],
-        },
-        {
           heading: '建议',
-          bullets: [{ text: '发出前补上真实拜访日期、具体型号与你的联系方式。' }],
+          bullets: [{ text: '发出前补上真实收件人邮箱、拜访日期、具体型号与你的联系方式。' }],
         },
       ],
+      emailDraft: {
+        to: '',
+        subject,
+        body,
+      },
       followUps: ['把语气改得更正式一点', '改成微信跟进短消息', '仁济医院最近怎么样？'],
       confidence: 0.7,
     }
@@ -269,26 +271,35 @@ export function heuristicAssist(
   }
 }
 
+function normalizeEmailDraft(
+  draft?: { to?: string; subject?: string; body?: string } | null,
+): EmailDraftFields | undefined {
+  if (!draft) return undefined
+  const subject = String(draft.subject || '').trim()
+  const body = String(draft.body || '').trim()
+  if (!subject || !body) return undefined
+  return {
+    to: String(draft.to || '').trim(),
+    subject,
+    body,
+  }
+}
+
 function buildMessage(params: {
   answer: string
   title?: string
   sections?: MessageUiBlock['sections']
   followUps?: string[]
+  emailDraft?: EmailDraftFields
   confidence: number
   sources: SourceRef[]
   usedWeb: boolean
   mode: LlmSuccessMode | 'heuristic'
 }): AgentMessage {
-  const webOffNote = !hasWebSearch() && !hasWebFetch()
-    ? '当前未配置 WEB_SEARCH_API_KEY，无法实时联网检索。'
-    : !params.usedWeb
-      ? '本次未使用网页检索。'
-      : ''
-  const footnote = params.usedWeb
-    ? '部分内容来自公开网页检索，请自行核实。'
-    : params.mode === 'heuristic'
-      ? `规则/模板答复（非实时网页，也未写入 CRM）。${webOffNote}`
-      : `基于模型知识的助手答复，非 CRM 种子事实。${webOffNote}请核实后再用于对外沟通。`
+  const emailDraft = normalizeEmailDraft(params.emailDraft)
+  const actions = emailDraft
+    ? ([{ id: 'edit_send_email', label: '编辑并发送邮件' }] as MessageUiBlock['actions'])
+    : undefined
 
   return {
     id: uid('msg'),
@@ -307,9 +318,9 @@ function buildMessage(params: {
       sections: params.sections,
       followUps: params.followUps,
       examples: params.followUps,
+      emailDraft,
+      actions,
       tone: params.usedWeb ? 'success' : 'info',
-      footnote,
-      originLabel: params.usedWeb ? '网页 + 助手' : '通用助手',
     },
   }
 }
@@ -411,6 +422,7 @@ export const generalAssistAgent: DomainAgent = {
               title: data.title,
               sections: data.sections,
               followUps: data.followUps,
+              emailDraft: normalizeEmailDraft(data.emailDraft),
               confidence: data.confidence ?? 0.75,
               sources: sources.slice(0, 6),
               usedWeb,
@@ -435,6 +447,7 @@ export const generalAssistAgent: DomainAgent = {
             title: data.title,
             sections: data.sections,
             followUps: data.followUps,
+            emailDraft: normalizeEmailDraft(data.emailDraft),
             confidence: data.confidence ?? 0.72,
             sources: (data.sources || []).map((s) => ({
               kind: 'other' as const,

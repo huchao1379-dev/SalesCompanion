@@ -10,7 +10,27 @@
   "buildEntryPoint": "index.html",
   "localAppUrl": "http://localhost:5174",
   "logoPath": "Default",
-  "connectionReferences": {},
+  "connectionReferences": {
+    "91cab27a-a822-4787-9964-16886552b370": {
+      "id": "/providers/microsoft.powerapps/apis/shared_outlook",
+      "displayName": "Outlook.com"
+    },
+    "2d8681e5-4093-4766-b9df-90bcbe44e110": {
+      "id": "/providers/Microsoft.PowerApps/apis/shared_logicflows",
+      "displayName": "Logic flows",
+      "dataSources": [
+        "powerappv2_________v2_"
+      ],
+      "workflowDetails": {
+        "workflowEntityId": "2ce6f955-abe8-f111-84ec-002248191860",
+        "workflowDisplayName": "PowerAppV2 -> 发送电子邮件(V2)",
+        "workflowName": "0907d485-5d5f-6b9f-f963-f8f8129990c1",
+        "dependencies": {
+          "shared_outlook": "91cab27a-a822-4787-9964-16886552b370"
+        }
+      }
+    }
+  },
   "databaseReferences": {},
   "appSettings": {
     "showHeader": false

@@ -118,8 +118,15 @@ export type MessageUiItem = {
 }
 
 export type MessageUiAction = {
-  id: 'open_account' | 'open_opportunity' | string
+  id: 'open_account' | 'open_opportunity' | 'edit_send_email' | string
   label: string
+}
+
+/** Editable email draft for chat UI → Power Automate send. */
+export type EmailDraftFields = {
+  to: string
+  subject: string
+  body: string
 }
 
 /** Structured blocks for rich chat rendering (not raw JSON dump). */
@@ -161,6 +168,8 @@ export type MessageUiBlock = {
   facts?: Array<{ label: string; value: string; tone?: MessageUiMetricTone }>
   /** Supervisor findings (non-blocking unless severity=block). */
   findings?: ReviewFinding[]
+  /** Follow-up email draft for client modal + cloud flow send. */
+  emailDraft?: EmailDraftFields
   tone?: 'info' | 'warn' | 'success'
 }
 
