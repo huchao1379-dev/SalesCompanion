@@ -1613,7 +1613,7 @@ function NativeChat({
       </div>
 
       {showNewMsgHint ? (
-        <button type="button" className="chat-newmsg" onClick={scrollToLatest}>
+        <button type="button" className="chat-newmsg" onClick={() => scrollToLatest()}>
           有新消息
         </button>
       ) : null}

@@ -425,8 +425,9 @@ async function playBytesViaWebAudio(
   }
   if (isStale()) return false
 
-  // decodeAudioData detaches the buffer — pass a copy.
-  const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+  // decodeAudioData detaches the buffer — pass a dedicated ArrayBuffer copy.
+  const copy = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(copy).set(bytes)
   let audioBuffer: AudioBuffer
   try {
     audioBuffer = await ctx.decodeAudioData(copy)
