@@ -14,7 +14,8 @@ function rfc1123Date(date = new Date()) {
   return date.toUTCString()
 }
 
-export function buildIFlytekIatAuthUrl(opts?: {
+/** 讯飞 WebAPI 通用鉴权（听写 / 合成共用 HMAC）。 */
+export function buildIFlytekAuthUrl(opts?: {
   apiKey?: string
   apiSecret?: string
   hostUrl?: string
@@ -49,6 +50,14 @@ export function buildIFlytekIatAuthUrl(opts?: {
     `&date=${encodeURIComponent(date)}` +
     `&host=${encodeURIComponent(url.host)}`
   return `${hostUrl}?${query}`
+}
+
+export function buildIFlytekIatAuthUrl(opts?: {
+  apiKey?: string
+  apiSecret?: string
+  hostUrl?: string
+}): string {
+  return buildIFlytekAuthUrl({ ...opts, hostUrl: opts?.hostUrl || IAT_BASE })
 }
 
 export type IFlytekIatTicket = {

@@ -17,6 +17,7 @@ type ApiHealth = {
   promptVersion: string
   speechProvider?: 'iflytek' | 'webspeech'
   iflytek?: boolean
+  iflytekTts?: boolean
   capabilities?: {
     activityInsight?: boolean
     opportunityInsight?: boolean
@@ -24,7 +25,17 @@ type ApiHealth = {
     webSearch?: boolean
     webFetch?: boolean
     speechIFlytek?: boolean
+    speechTtsIFlytek?: boolean
   }
+}
+
+export type IFlytekTtsResult = {
+  provider: 'iflytek'
+  mimeType: string
+  encoding?: string
+  voice?: string
+  audioBase64: string
+  byteLength: number
 }
 
 export type IFlytekIatTicket = {
@@ -283,6 +294,16 @@ export const api = {
     if (typeof window === 'undefined') return `${API_BASE}${path}`
     return `${window.location.origin}${API_BASE}${path}`
   },
+  /** 讯飞在线语音合成 → MP3 base64（每日播报 / Copilot 自动朗读）。 */
+  speechTts: (
+    body: { text: string; voice?: string; rate?: number },
+    init?: { signal?: AbortSignal },
+  ) =>
+    request<IFlytekTtsResult>('/speech/tts', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      signal: init?.signal,
+    }),
   supportsActivityInsight,
   supportsOpportunityInsight,
   orchestrate: (

@@ -11,7 +11,7 @@ import { HomeDashboard } from '../screens/HomeDashboard/HomeDashboard'
 import { OpportunityDetailScreen } from '../screens/OpportunityDetail/OpportunityDetail'
 import { OpportunityDraftScreen } from '../screens/OpportunityDraft/OpportunityDraft'
 import { TasksHub } from '../screens/TasksHub/TasksHub'
-import { ensureVoices, unlockSpeech } from '../speech/tts'
+import { cancelSpeech, ensureVoices, unlockSpeech } from '../speech/tts'
 import { useBrowserBottomInset } from './useBrowserBottomInset'
 
 export type ScreenId =
@@ -244,7 +244,10 @@ export function AppShell() {
         <BriefMe
           open={insightsOpen}
           playRequestId={briefPlayRequestId}
-          onClose={() => setInsightsOpen(false)}
+          onClose={() => {
+            cancelSpeech()
+            setInsightsOpen(false)
+          }}
         />
       ) : null}
 

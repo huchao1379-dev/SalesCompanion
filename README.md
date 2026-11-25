@@ -59,13 +59,18 @@ npm run dev
 | `WEB_SEARCH_PROVIDER` | `serper`（默认）或 `tavily` |
 | `WEB_FETCH_ENABLED` | 可选；抓取 https 页面（有搜索 Key 时默认开启） |
 | `SPEECH_PROVIDER` | `auto`（默认）/ `iflytek` / `webspeech` |
-| `IFLYTEK_APP_ID` / `API_KEY` / `API_SECRET` | 可选；配置后语音走讯飞听写（国内可用，不依赖 Google） |
+| `IFLYTEK_APP_ID` / `API_KEY` / `API_SECRET` | 可选；听写 + 合成共用（国内可用，不依赖 Google） |
+| `IFLYTEK_TTS_VCN` | 可选；合成发音人，默认 `xiaoyan`（需在控制台开通） |
 
-### 切换到讯飞语音识别
+### 切换到讯飞语音（听写 + 播报）
 
-架构：浏览器采 PCM → `GET /api/speech/iat/ticket` 取参数 → 经 **`wss://你的API/api/speech/iat/ws` 同源代理** 再连讯飞（**APISecret 只留在服务端**；移动端不必把 `iat-api.xfyun.cn` 写进 CSP）。
+**听写（ASR）**：浏览器采 PCM → `GET /api/speech/iat/ticket` → HTTPS 会话 / WSS 代理 → 讯飞（密钥只留服务端）。
 
-1. 在[讯飞开放平台](https://console.xfyun.cn/)创建应用并开通 **语音听写（流式版）**，复制 AppID / APIKey / APISecret
+**播报（TTS）**：每日播报 / Copilot 自动朗读 → `POST /api/speech/tts` → 服务端连 `tts-api.xfyun.cn` 合成 MP3 → 前端 `Audio` 播放（**不再依赖 Google / speechSynthesis**；失败时才回退浏览器 TTS）。
+
+1. 在[讯飞开放平台](https://console.xfyun.cn/)创建应用，并开通：
+   - **语音听写（流式版）**（新建拜访 / Copilot 录音）
+   - **在线语音合成（流式版）**，并添加发音人（如小燕 `xiaoyan`）
 2. 若尚无 `server/.env`：`cd server && copy .env.example .env`（macOS/Linux 用 `cp`）
 3. 在 `server/.env` 填写：
 
@@ -74,7 +79,9 @@ SPEECH_PROVIDER=auto
 IFLYTEK_APP_ID=你的AppID
 IFLYTEK_API_KEY=你的APIKey
 IFLYTEK_API_SECRET=你的APISecret
-# 可选：语言/方言/动态修正
+# 可选：合成发音人（控制台显示的 vcn）
+# IFLYTEK_TTS_VCN=xiaoyan
+# 可选：听写语言/方言/动态修正
 # IFLYTEK_LANGUAGE=zh_cn
 # IFLYTEK_ACCENT=mandarin
 # IFLYTEK_DWA=wpgs
@@ -82,11 +89,11 @@ IFLYTEK_API_SECRET=你的APISecret
 ```
 
 4. 重启 API（`npm run dev` 或 `npm run dev:all`）
-5. 验证：`curl http://127.0.0.1:8787/api/health` 应看到 `"speechProvider":"iflytek"`、`"iflytek":true`
-6. 打开对话页 / 拜访录入，长按麦克风；隐私文案应显示「讯飞听写」
-7. 前端也可强制：根目录 `.env` 设 `VITE_SPEECH_PROVIDER=iflytek`（或 `webspeech`）后重启 Vite
+5. 验证：`curl http://127.0.0.1:8787/api/health` 应看到 `"speechProvider":"iflytek"`、`"iflytek":true`、`"iflytekTts":true`
+6. 打开对话页 / 拜访录入点按麦克风；每日播报应走讯飞合成
+7. 前端也可强制听写：根目录 `.env` 设 `VITE_SPEECH_PROVIDER=iflytek`（或 `webspeech`）后重启 Vite
 
-未配置讯飞密钥时自动回退浏览器 Web Speech（Chrome 国内常不稳定）。
+未配置讯飞密钥时：听写回退浏览器 Web Speech；播报回退 `speechSynthesis`（Chrome 上常走 Google，国内/部分安卓浏览器不稳定）。
 
 **线上移动端注意（Power Apps / 安卓 / iOS）：**
 

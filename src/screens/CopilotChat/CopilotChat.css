@@ -163,6 +163,7 @@
   border: 1px solid rgba(17, 24, 39, 0.08);
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
   z-index: 30;
+  overflow: hidden;
 }
 
 .chat-history-panel__head {
@@ -216,12 +217,13 @@
   background: transparent;
   text-align: left;
   border-radius: 10px;
-  padding: 0.5rem 0.55rem;
+  padding: 0.55rem 0.55rem;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 0.18rem;
+  gap: 0.2rem;
   min-width: 0;
+  overflow: hidden;
   color: var(--text);
 }
 
@@ -237,9 +239,11 @@
 .chat-history-panel__title {
   font-size: 0.84rem;
   font-weight: 700;
+  line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 100%;
 }
 
 .chat-history-panel__meta {
@@ -248,23 +252,7 @@
   gap: 0.4rem;
   font-size: 0.68rem;
   color: var(--text-secondary);
-}
-
-.chat-history-panel__account {
-  max-width: 7.5rem;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #0f766e;
-  font-weight: 650;
-}
-
-.chat-history-panel__preview {
-  font-size: 0.72rem;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .chat-history-panel__delete {
@@ -308,10 +296,7 @@
   background: var(--surface-solid);
   border-color: var(--line);
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.45);
-}
-
-:root[data-theme='dark'] .chat-history-panel__account {
-  color: #5eead4;
+  overflow: hidden;
 }
 
 :root[data-theme='dark'] .chat-screen__action-btn.ui-icon-btn {
@@ -817,10 +802,9 @@
 }
 
 .chat-dock__chips {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.45rem;
-  justify-content: center;
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -831,14 +815,17 @@
   background: var(--surface-solid);
   color: var(--text-secondary);
   border-radius: 999px;
-  padding: 0.48rem 0.8rem;
-  font-size: 0.8rem;
+  padding: 0.48rem 0.35rem;
+  font-size: 0.72rem;
   font-weight: 650;
   cursor: pointer;
-  max-width: 100%;
-  flex: 1 1 calc(33.333% - 0.45rem);
-  min-width: 5.5rem;
+  width: 100%;
+  min-width: 0;
   min-height: 40px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
@@ -1435,15 +1422,36 @@
   font-size: 0.9rem;
   font-weight: 700;
   cursor: pointer;
+  /* Match 新建拜访 MicButton — tap toggle, no Android long-press / callout menus. */
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-drag: none;
+}
+
+.chat-dock__voice-pad span,
+.chat-dock__voice-pad i {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  pointer-events: none;
+}
+
+.chat-dock__voice-pad::selection,
+.chat-dock__voice-pad *::selection {
+  background: transparent;
 }
 
 .chat-dock__voice-pad.is-listening {
   background: rgba(20, 184, 166, 0.18);
   color: #115e59;
+}
+
+.chat-dock__voice-pad.is-replay {
+  background: rgba(59, 130, 246, 0.14);
+  color: #1d4ed8;
 }
 
 .chat-dock__voice-pad:disabled {
@@ -1610,9 +1618,14 @@
     padding-right: 0.7rem;
   }
 
+  .chat-dock__chips {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.35rem;
+  }
+
   .chat-dock__chip {
-    flex: 1 1 100%;
-    text-align: center;
+    font-size: 0.68rem;
+    padding: 0.42rem 0.25rem;
   }
 
   .chat-bubble {

@@ -70,6 +70,7 @@ export function BriefMe({ open, onClose, playRequestId = 0 }: Props) {
   /** Armed by open / refresh / play; allows playlist auto-advance. */
   const userArmedPlayRef = useRef(false)
   const speakStartedAt = useRef(0)
+  const stopHandleRef = useRef<(() => void) | null>(null)
   const dragY = useRef(0)
   const startY = useRef(0)
   const sheetRef = useRef<HTMLElement | null>(null)
@@ -127,6 +128,9 @@ export function BriefMe({ open, onClose, playRequestId = 0 }: Props) {
     return () => {
       speakGen.current += 1
       playlistRef.current = false
+      userArmedPlayRef.current = false
+      stopHandleRef.current?.()
+      stopHandleRef.current = null
       cancelSpeech()
     }
   }, [])
@@ -141,6 +145,9 @@ export function BriefMe({ open, onClose, playRequestId = 0 }: Props) {
     speakGen.current += 1
     playlistRef.current = false
     userArmedPlayRef.current = false
+    stopHandleRef.current?.()
+    stopHandleRef.current = null
+    // Stops browser synth AND 讯飞 shared Audio (hard kill).
     cancelSpeech()
     setPlaying(false)
   }, [])
@@ -160,20 +167,15 @@ export function BriefMe({ open, onClose, playRequestId = 0 }: Props) {
       setPlaying(false)
       return
     }
-    if (typeof window === 'undefined' || !window.speechSynthesis) {
+    if (typeof window === 'undefined') {
       playlistRef.current = false
       userArmedPlayRef.current = false
       setPlaying(false)
-      setTtsError('当前运行环境不支持语音播报，请使用 Chrome 或 Edge 浏览器。')
+      setTtsError('当前运行环境不支持语音播报。')
       return
     }
 
-    if (fromUserGesture) {
-      userArmedPlayRef.current = true
-      pendingAutoRetryRef.current = false
-      unlockSpeech()
-    } else if (!userArmedPlayRef.current) {
-      // Playlist continuation is allowed only after open/refresh/play armed TTS.
+    if (!fromUserGesture && !userArmedPlayRef.current) {
       playlistRef.current = false
       setPlaying(false)
       return
@@ -181,8 +183,20 @@ export function BriefMe({ open, onClose, playRequestId = 0 }: Props) {
 
     playlistRef.current = playlist
 
+    // 1) Invalidate + hard-stop previous clip first (avoid overlap).
     speakGen.current += 1
     const gen = speakGen.current
+    stopHandleRef.current?.()
+    stopHandleRef.current = null
+    cancelSpeech()
+
+    // 2) Re-arm unlock on the now-idle shared Audio inside this gesture (swipe/tap).
+    if (fromUserGesture) {
+      userArmedPlayRef.current = true
+      pendingAutoRetryRef.current = false
+      unlockSpeech()
+    }
+
     speakStartedAt.current = Date.now()
 
     const insight = chapterToInsight(current, index)
@@ -192,7 +206,7 @@ export function BriefMe({ open, onClose, playRequestId = 0 }: Props) {
     setPlaying(false)
     setTtsError('')
 
-    speakText(text, {
+    stopHandleRef.current = speakText(text, {
       lang: 'zh-CN',
       rate: 1,
       onStart: () => {
@@ -202,8 +216,8 @@ export function BriefMe({ open, onClose, playRequestId = 0 }: Props) {
       },
       onEnd: () => {
         if (gen !== speakGen.current) return
+        stopHandleRef.current = null
         const livedMs = Date.now() - speakStartedAt.current
-        // Ignore instant end (blocked TTS) so we don't cascade 0→1→2→3.
         const canAdvance =
           playlistRef.current &&
           userArmedPlayRef.current &&
@@ -222,24 +236,28 @@ export function BriefMe({ open, onClose, playRequestId = 0 }: Props) {
       },
       onError: (error) => {
         if (gen !== speakGen.current) return
+        stopHandleRef.current = null
         playlistRef.current = false
-        userArmedPlayRef.current = false
         setPlaying(false)
         const blocked = error.error === 'not-allowed'
         if (blocked && autoPlay) {
-          // First paint / cold open has no gesture — retry on the next tap.
           pendingAutoRetryRef.current = true
+          // Keep armed so a later tap / swipe can resume the playlist.
+        } else if (blocked) {
+          pendingAutoRetryRef.current = true
+        } else {
+          userArmedPlayRef.current = false
         }
         setTtsError(
           blocked
             ? autoPlay
               ? '浏览器拦截了自动播报，点任意处或播放按钮即可开始。'
-              : '浏览器没有启动语音播报，请检查语音权限或使用 Chrome/Edge 重试。'
+              : '播报被拦截，请再点一次播放；若仍失败请检查麦克风/媒体权限。'
             : error.error === 'language-unavailable' ||
                 error.error === 'voice-unavailable' ||
                 error.error === 'synthesis-unavailable'
-              ? '当前设备没有可用的中文语音，请检查系统语音设置。'
-              : '语音播报启动失败，请检查浏览器权限或稍后重试。',
+              ? '当前无可用中文语音。请确认讯飞已开通「在线语音合成」，或检查系统语音设置。'
+              : '语音播报启动失败。请确认服务端已配置讯飞合成，或稍后重试。',
         )
       },
     })
@@ -248,14 +266,20 @@ export function BriefMe({ open, onClose, playRequestId = 0 }: Props) {
   const goToPage = useCallback(
     (index: number, opts?: { play?: boolean; playlist?: boolean }) => {
       const next = Math.max(0, Math.min(pagesRef.current.length - 1, index))
+      if (next === pageRef.current && opts?.play === false) return
+
       pageRef.current = next
       setPage(next)
       setDragX(0)
       setElapsed(0)
-      if (opts?.play) {
+
+      // Swipe / dots: always stop the previous clip, then auto-play the new card
+      // while the pointer gesture is still hot (needed for 讯飞 Audio on Android).
+      const shouldPlay = opts?.play !== false
+      if (shouldPlay) {
         speakPage(next, {
           fromUserGesture: true,
-          playlist: opts.playlist ?? true,
+          playlist: opts?.playlist ?? true,
         })
       } else {
         stopSpeak()
@@ -271,25 +295,23 @@ export function BriefMe({ open, onClose, playRequestId = 0 }: Props) {
       setDragX(0)
       return
     }
-    // Open → land on first card and autoplay through the playlist.
-    // Parent must call unlockSpeech() in the same tap; we speak ASAP (no long
-    // delay) so mobile browsers still treat the session as unlocked.
     pageRef.current = 0
     setPage(0)
     setElapsed(0)
     setDragX(0)
     setTtsError('')
-    // Microtask keeps unlock utterance from being cancelled in the same tick
-    // as speakText's cancel(), while staying close to the user gesture.
     let cancelled = false
     const start = () => {
       if (cancelled) return
       speakPage(0, { fromUserGesture: true, playlist: true, autoPlay: true })
     }
-    const t = window.setTimeout(start, 0)
+    // rAF keeps unlock (parent tap) from racing cancel in the same tick.
+    const t = window.requestAnimationFrame(start)
     return () => {
       cancelled = true
-      window.clearTimeout(t)
+      window.cancelAnimationFrame(t)
+      // Closing / remounting mid-fetch must kill audio immediately.
+      stopSpeak()
     }
   }, [open, playRequestId, speakPage, stopSpeak])
   /* eslint-enable react-hooks/set-state-in-effect */

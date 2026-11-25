@@ -113,6 +113,11 @@ export const config = {
   iflytekDwa: (process.env.IFLYTEK_DWA ?? 'wpgs').trim(),
   iflytekVadEos: Number(process.env.IFLYTEK_VAD_EOS || 3000),
   /**
+   * 在线语音合成发音人（控制台「语音合成」里开通后的 vcn 参数，如 xiaoyan / x4_xiaoyan）。
+   * 与听写共用 IFLYTEK_APP_ID / KEY / SECRET，但需在控制台单独开通合成服务。
+   */
+  iflytekTtsVcn: (process.env.IFLYTEK_TTS_VCN || 'xiaoyan').trim(),
+  /**
    * Speech provider preference:
    * - auto: 有讯飞密钥则 iflytek，否则 webspeech
    * - iflytek / webspeech: 强制

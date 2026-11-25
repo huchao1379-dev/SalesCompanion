@@ -49,6 +49,13 @@ import {
 } from '../../data/dataverse'
 import { canConfirmDraft } from '../../data/syncStatus'
 import { useSpeechRecognition } from '../../speech/useSpeechRecognition'
+import {
+  armSpeechGate,
+  cancelSpeech,
+  disarmSpeechGate,
+  speakText,
+  unlockSpeech,
+} from '../../speech/tts'
 
 type PendingAttachment = {
   id: string
@@ -323,6 +330,18 @@ function stepStatusLabel(status: AgentStep['status']) {
   return '完成'
 }
 
+/** Plain text for mobile TTS — strip markdown noise from assistant replies. */
+function stripSpeakable(text: string) {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`[^`]+`/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[#>*_~|]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export function CopilotChat(props: Props) {
   return <NativeChat {...props} />
 }
@@ -360,10 +379,20 @@ function NativeChat({
   )
   const [composerMode, setComposerMode] = useState<'text' | 'voice'>('text')
   const [voiceHint, setVoiceHint] = useState('')
+  /** When auto-TTS is blocked, keep reply text for one-tap replay inside a user gesture. */
+  const [pendingSpeakText, setPendingSpeakText] = useState('')
   const [syncNotice, setSyncNotice] = useState('')
   const [webSearchEnabled, setWebSearchEnabled] = useState(false)
   const voicePreferredRef = useRef(false)
+  /** After a voice turn, auto-speak the assistant reply (needs unlockSpeech in the mic gesture). */
+  const speakReplyAfterTurnRef = useRef(false)
+  const stopSpeakRef = useRef<(() => void) | null>(null)
+  const composerModeRef = useRef(composerMode)
   const historyPanelRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    composerModeRef.current = composerMode
+  }, [composerMode])
 
   const messages = useMemo(() => conversation.messages, [conversation.messages])
   const isEmpty = messages.length === 0
@@ -404,18 +433,27 @@ function NativeChat({
     setComposerMode('voice')
     setVoiceHint(
       speech.provider === 'iflytek'
-        ? '长按识别语音（讯飞）；点键盘可切回文字输入'
-        : '长按识别语音；点键盘可切回文字输入',
+        ? '点按开始录音（讯飞）；再次点按结束并发送'
+        : '点按开始录音；再次点按结束并发送',
     )
   }, [speech.supported, speech.provider])
 
   // Avoid speaking into a cold engine — first syllables are often dropped before ready.
   useEffect(() => {
-    if (!speech.listening) return
+    if (composerMode !== 'voice' || !speech.listening) return
     setVoiceHint(
-      speech.ready ? '正在听你说话…松开结束' : '准备中，请稍等再开口…',
+      speech.ready ? '正在听你说话…点按结束并发送' : '准备中，请稍等再开口…',
     )
-  }, [speech.listening, speech.ready])
+  }, [composerMode, speech.listening, speech.ready])
+
+  useEffect(() => {
+    return () => {
+      stopSpeakRef.current?.()
+      stopSpeakRef.current = null
+      disarmSpeechGate()
+      cancelSpeech()
+    }
+  }, [])
 
   // Hydrate drafts from API on mount; merge with local mirror.
   useEffect(() => {
@@ -756,7 +794,37 @@ function NativeChat({
       console.info(
         `[chat] ok intent=${res.intent || '—'} mode=${res.mode || getOrchestratorMode()} ${res.latencyMs}ms`,
       )
+
+      // Voice turn → auto-speak reply. Gate must stay armed from mic stop gesture.
+      if (speakReplyAfterTurnRef.current) {
+        speakReplyAfterTurnRef.current = false
+        const spoken = stripSpeakable(
+          (withSteps.length ? withSteps : next.messages.filter((m) => m.id === assistantId))
+            .map((m) => m.content || '')
+            .join('。'),
+        )
+        if (spoken) {
+          stopSpeakRef.current?.()
+          stopSpeakRef.current = speakText(spoken, {
+            lang: 'zh-CN',
+            onEnd: () => {
+              stopSpeakRef.current = null
+            },
+            onError: () => {
+              stopSpeakRef.current = null
+              setPendingSpeakText(spoken)
+              setVoiceHint('自动播报被拦截，点此播报回复，或继续点按麦克风。')
+            },
+          })
+        } else {
+          disarmSpeechGate()
+        }
+      } else {
+        disarmSpeechGate()
+      }
     } catch (err) {
+      speakReplyAfterTurnRef.current = false
+      disarmSpeechGate()
       if (handle.completed || genRef.current?.id !== generationId) return
 
       const aborted =
@@ -794,7 +862,8 @@ function NativeChat({
         genRef.current = null
       }
       setGenerating(Boolean(genRef.current))
-      inputRef.current?.focus()
+      // Voice mode keeps the soft keyboard closed on mobile.
+      if (composerModeRef.current !== 'voice') inputRef.current?.focus()
     }
   }
 
@@ -804,32 +873,96 @@ function NativeChat({
       setVoiceHint('当前浏览器不支持语音识别，请继续用键盘输入。')
       return
     }
+    // Arm TTS inside this tap so later auto-speak after a voice turn is allowed.
+    unlockSpeech()
+    setPendingSpeakText('')
     setComposerMode('voice')
-    setVoiceHint('长按识别语音')
+    setVoiceHint(
+      speech.provider === 'iflytek'
+        ? '点按开始录音（讯飞）；再次点按结束并发送'
+        : '点按开始录音；再次点按结束并发送',
+    )
     inputRef.current?.blur()
   }
 
   function exitVoiceMode() {
+    speakReplyAfterTurnRef.current = false
+    disarmSpeechGate()
     if (speech.listening) void speech.stop({ graceMs: 0 })
     setComposerMode('text')
     setVoiceHint('')
+    setPendingSpeakText('')
     window.setTimeout(() => inputRef.current?.focus(), 40)
   }
 
-  function startVoicePress() {
+  /** Same tap-to-toggle pattern as 新建拜访 MicButton — avoids Android system ASR / long-press menus. */
+  function toggleVoicePad() {
     if (busy || generating || !speech.supported) return
+    if (pendingSpeakText) {
+      replayPendingSpeak()
+      return
+    }
+    if (speech.listening) {
+      void finishVoiceTurn()
+      return
+    }
+    beginVoiceTurn()
+  }
+
+  function replayPendingSpeak() {
+    const text = pendingSpeakText.trim()
+    if (!text) return
+    unlockSpeech()
+    setPendingSpeakText('')
+    stopSpeakRef.current?.()
+    stopSpeakRef.current = speakText(text, {
+      lang: 'zh-CN',
+      onEnd: () => {
+        stopSpeakRef.current = null
+        setVoiceHint(
+          speech.provider === 'iflytek'
+            ? '点按开始录音（讯飞）；再次点按结束并发送'
+            : '点按开始录音；再次点按结束并发送',
+        )
+      },
+      onError: () => {
+        stopSpeakRef.current = null
+        setPendingSpeakText(text)
+        setVoiceHint('播报失败，请再点一次或检查系统语音权限。')
+      },
+    })
+    setVoiceHint('正在播报回复…')
+  }
+
+  function beginVoiceTurn() {
+    stopSpeakRef.current?.()
+    stopSpeakRef.current = null
+    cancelSpeech()
+    setPendingSpeakText('')
+    // Prime TTS inside this tap; keep-alive starts only after stop (mic must stay free).
+    unlockSpeech()
+    speakReplyAfterTurnRef.current = true
     setVoiceHint('准备中，请稍等再开口…')
     speech.start('zh-CN')
   }
 
-  async function stopVoicePress() {
+  async function finishVoiceTurn() {
+    // Re-arm inside this tap — most recent gesture before async settle + orchestrate.
+    unlockSpeech()
+    armSpeechGate()
+    speakReplyAfterTurnRef.current = true
     setVoiceHint('正在收尾识别…')
     const text = await speech.stop()
     if (text.trim()) {
-      setVoiceHint('')
-      setComposerMode('text')
+      setVoiceHint(
+        speech.provider === 'iflytek'
+          ? '点按开始录音（讯飞）；再次点按结束并发送'
+          : '点按开始录音；再次点按结束并发送',
+      )
       void send(text)
     } else {
+      speakReplyAfterTurnRef.current = false
+      disarmSpeechGate()
       setVoiceHint(speech.error || '没有识别到语音，可以再说一次，或切回键盘输入。')
     }
   }
@@ -838,6 +971,11 @@ function NativeChat({
     const trimmed = text.trim()
     const pending = attachments
     if ((!trimmed && pending.length === 0) || busy || generating) return
+
+    stopSpeakRef.current?.()
+    stopSpeakRef.current = null
+    // Keep the mobile TTS gate if this send came from a voice turn (auto-speak reply).
+    cancelSpeech({ keepGate: speakReplyAfterTurnRef.current })
 
     const attachLine =
       pending.length === 0
@@ -882,6 +1020,12 @@ function NativeChat({
   }
 
   function stopGeneration() {
+    speakReplyAfterTurnRef.current = false
+    disarmSpeechGate()
+    stopSpeakRef.current?.()
+    stopSpeakRef.current = null
+    cancelSpeech()
+    setPendingSpeakText('')
     const handle = genRef.current
     if (!handle || handle.completed) return
     handle.stopped = true
@@ -1080,12 +1224,8 @@ function NativeChat({
                     >
                       <span className="chat-history-panel__title">{item.title}</span>
                       <span className="chat-history-panel__meta">
-                        {item.accountName ? (
-                          <span className="chat-history-panel__account">{item.accountName}</span>
-                        ) : null}
                         <span>{formatConversationTime(item.updatedAt)}</span>
                       </span>
-                      <span className="chat-history-panel__preview">{item.preview}</span>
                     </button>
                     <button
                       type="button"
@@ -1153,7 +1293,7 @@ function NativeChat({
               </ol>
             </div>
             <p className="chat-empty__hint">
-              语音优先：长按下方麦克风说话；点键盘可切回文字。也可点快捷入口或上传图片/文本附件（附件会尝试识别，复杂 OCR 不在 Demo 范围）。
+              语音优先：点按下方开始录音，再次点按结束并发送；点键盘可切回文字。也可点快捷入口或上传图片/文本附件（附件会尝试识别，复杂 OCR 不在 Demo 范围）。
               {webSearchEnabled
                 ? ' 已启用网页检索，可直接问公开政策或资料。'
                 : ' 通用问答可用；实时网页检索需在 server/.env 配置 WEB_SEARCH_API_KEY。'}
@@ -1521,20 +1661,24 @@ function NativeChat({
           ) : (
             <button
               type="button"
-              className={`chat-dock__voice-pad${speech.listening ? ' is-listening' : ''}`}
-              aria-label="长按识别语音，松开结束"
-              disabled={busy || generating || !speech.supported}
-              onPointerDown={(event) => {
+              className={`chat-dock__voice-pad${speech.listening ? ' is-listening' : ''}${
+                pendingSpeakText ? ' is-replay' : ''
+              }`}
+              aria-label={
+                pendingSpeakText
+                  ? '点按播报回复'
+                  : speech.listening
+                    ? '点按结束录音并发送'
+                    : speech.provider === 'iflytek'
+                      ? '点按开始录音（讯飞）'
+                      : '点按开始录音'
+              }
+              aria-pressed={speech.listening}
+              disabled={busy || generating || (!speech.supported && !pendingSpeakText)}
+              onClick={(event) => {
                 event.preventDefault()
-                event.currentTarget.setPointerCapture?.(event.pointerId)
-                startVoicePress()
+                toggleVoicePad()
               }}
-              onPointerUp={(event) => {
-                event.preventDefault()
-                event.currentTarget.releasePointerCapture?.(event.pointerId)
-                stopVoicePress()
-              }}
-              onPointerCancel={stopVoicePress}
               onContextMenu={(event) => event.preventDefault()}
             >
               <span className="chat-dock__voice-bars" aria-hidden>
@@ -1543,12 +1687,17 @@ function NativeChat({
                 <i />
                 <i />
               </span>
-              <span>
-                {speech.listening
-                  ? speech.ready
-                    ? '松开结束识别'
-                    : '准备中…'
-                  : voiceHint || '长按识别语音'}
+              <span aria-hidden>
+                {pendingSpeakText
+                  ? '点按播报回复'
+                  : speech.listening
+                    ? speech.ready
+                      ? '点按结束并发送'
+                      : '准备中…'
+                    : voiceHint ||
+                      (speech.provider === 'iflytek'
+                        ? '点按开始录音（讯飞）'
+                        : '点按开始录音')}
               </span>
             </button>
           )}

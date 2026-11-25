@@ -14,6 +14,7 @@ import {
 } from '../config.js'
 import { issueIFlytekIatTicket } from '../speech/iflytek.js'
 import { mountIFlytekHttpSessionRoutes } from '../speech/iflytekHttpSession.js'
+import { synthesizeIFlytekTts } from '../speech/iflytekTts.js'
 import { CopilotStudioConfigurationError, copilotStudioOrchestrate } from '../copilotStudio.js'
 import { orchestrate } from '../orchestrator.js'
 import { repository } from '../store/dataverseStore.js'
@@ -65,6 +66,8 @@ apiRouter.get('/health', async (_req, res) => {
         : undefined,
     speechProvider: resolveSpeechProvider(),
     iflytek: hasIFlytek(),
+    /** 听写 + 合成共用密钥；合成需在控制台开通「在线语音合成」。 */
+    iflytekTts: hasIFlytek(),
     capabilities: {
       activityInsight: true,
       opportunityInsight: true,
@@ -72,6 +75,7 @@ apiRouter.get('/health', async (_req, res) => {
       webSearch: hasWebSearch(),
       webFetch: hasWebFetch(),
       speechIFlytek: hasIFlytek(),
+      speechTtsIFlytek: hasIFlytek(),
     },
   })
 })
@@ -100,6 +104,40 @@ apiRouter.get('/speech/iat/ticket', (_req, res) => {
 
 /** HTTPS 会话代理（Power Apps CSP 通常只放行 https，不放行 wss） */
 mountIFlytekHttpSessionRoutes(apiRouter)
+
+/**
+ * 讯飞在线语音合成：服务端连 tts-api.xfyun.cn，返回 MP3 base64。
+ * 前端用 Audio 播放，避开移动端 Google / speechSynthesis 限制。
+ */
+apiRouter.post('/speech/tts', async (req, res) => {
+  if (!hasIFlytek()) {
+    res.status(503).json({
+      error: '讯飞语音未配置',
+      detail: '请在 server/.env 填写 IFLYTEK_*，并在控制台开通「在线语音合成」',
+    })
+    return
+  }
+  const text = typeof req.body?.text === 'string' ? req.body.text : ''
+  const voice = typeof req.body?.voice === 'string' ? req.body.voice : undefined
+  const rate = typeof req.body?.rate === 'number' ? req.body.rate : undefined
+  if (!text.trim()) {
+    res.status(400).json({ error: 'text 不能为空' })
+    return
+  }
+  try {
+    const result = await synthesizeIFlytekTts(text, { voice, rate })
+    res.json(result)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '讯飞合成失败'
+    const authFail = /10005|11200|授权|license/i.test(message)
+    res.status(authFail ? 502 : 500).json({
+      error: message,
+      detail: authFail
+        ? '请确认该 AppID 已在讯飞控制台开通「在线语音合成（流式版）」并添加发音人'
+        : undefined,
+    })
+  }
+})
 
 /** Unified agent management entry — Domain Agents + IntentRouter skills. */
 apiRouter.get('/agents', (_req, res) => {
